@@ -4,6 +4,11 @@ This file summarizes human-visible changes. Individual project specifications an
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-26
+
+- Fixed the project links in the PyPI long description so docs and repository policies open on GitHub.
+- Rebuilt and retested the distribution through GitHub Actions.
+
 ## [0.3.0] - 2026-09-26
 
 - Adopted **Vega SDD** as the public name and `vega-sdd` as the distribution; kept the `sdd` CLI and the compatible `universal_sdd` Python import.

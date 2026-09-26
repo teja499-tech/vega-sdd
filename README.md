@@ -4,7 +4,7 @@
 
 Vega SDD is an open source, repository-owned framework for planning, implementing, reviewing, and releasing software with AI coding agents. It connects product intent, human-readable design, tasks, checks, changes, and release evidence so a project can continue across sessions and agent tools.
 
-> **Status:** 0.3.0 alpha. The controller and mock adapter have local test coverage. Real coding-agent CLIs, GitHub hosting controls, deployed environments, and non-Linux platforms still require validation in your own setup. [See verification notes](docs/VERIFICATION_0.2.0.md).
+> **Status:** 0.3.1 alpha. The controller and mock adapter have local test coverage. Real coding-agent CLIs, GitHub hosting controls, deployed environments, and non-Linux platforms still require validation in your own setup. [See verification notes](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md).
 
 ## Start here
 
@@ -26,7 +26,7 @@ sdd verify
 sdd start
 ```
 
-The mock adapter exercises the workflow; it does not implement production code. For real work, use `sdd doctor` to inspect installed agent CLIs, choose an adapter during initialization, and configure the project's actual check commands before starting. See the [user guide](docs/USER_GUIDE.md).
+The mock adapter exercises the workflow; it does not implement production code. For real work, use `sdd doctor` to inspect installed agent CLIs, choose an adapter during initialization, and configure the project's actual check commands before starting. See the [user guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USER_GUIDE.md).
 
 ## What it manages
 
@@ -45,7 +45,7 @@ The generated documents describe the approved project state; they are not proof 
 
 The project policy supports new and existing applications, APIs, libraries, CLIs, data pipelines, infrastructure, utilities, frameworks, and monorepos. Each project supplies its own verification and deployment commands. An existing project can be adopted with `sdd init --project-kind existing`; the framework does not assume every project has a database or deployment environment.
 
-The [lifecycle guide](docs/PROJECT_LIFECYCLE.md) documents project-kind policies, branching and PR gates, CI exports, releases, and deployment receipts. The [design documentation guide](docs/HUMAN_DOCUMENTATION.md) covers generated artifacts and commit-linked history.
+The [lifecycle guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PROJECT_LIFECYCLE.md) documents project-kind policies, branching and PR gates, CI exports, releases, and deployment receipts. The [design documentation guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) covers generated artifacts and commit-linked history.
 
 ## Day-to-day commands
 
@@ -66,18 +66,18 @@ Run `sdd --help` for the full command list. The project state lives under `.sdd/
 
 | Guide | Covers |
 | --- | --- |
-| [Getting started](docs/USER_GUIDE.md) | Project initialization and everyday use |
-| [Project lifecycle](docs/PROJECT_LIFECYCLE.md) | Project kinds, checks, branches, PRs, CI and deployment |
-| [Design and history](docs/HUMAN_DOCUMENTATION.md) | Human-readable design and commit-linked changelog |
-| [Architecture](docs/ARCHITECTURE.md) | Controller, agents and durable state |
-| [Specification model](docs/SPEC_MODEL.md) | Requirement, feature and task identity |
-| [Agent adapters](docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude Code and mock boundaries |
-| [Verification](docs/VERIFICATION_0.2.0.md) | Local results and remaining qualification |
-| [Research and gaps](docs/RESEARCH_AND_GAPS.md) | Cross-project design rationale |
+| [Getting started](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USER_GUIDE.md) | Project initialization and everyday use |
+| [Project lifecycle](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PROJECT_LIFECYCLE.md) | Project kinds, checks, branches, PRs, CI and deployment |
+| [Design and history](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) | Human-readable design and commit-linked changelog |
+| [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, agents and durable state |
+| [Specification model](https://github.com/teja499-tech/vega-sdd/blob/main/docs/SPEC_MODEL.md) | Requirement, feature and task identity |
+| [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude Code and mock boundaries |
+| [Verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md) | Local results and remaining qualification |
+| [Research and gaps](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RESEARCH_AND_GAPS.md) | Cross-project design rationale |
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for a local setup and review expectations, [SECURITY.md](SECURITY.md) for reporting vulnerabilities, and [CHANGELOG.md](CHANGELOG.md) for releases. The project is licensed under [Apache 2.0](LICENSE).
+See [CONTRIBUTING.md](https://github.com/teja499-tech/vega-sdd/blob/main/CONTRIBUTING.md) for a local setup and review expectations, [SECURITY.md](https://github.com/teja499-tech/vega-sdd/blob/main/SECURITY.md) for reporting vulnerabilities, and [CHANGELOG.md](https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md) for releases. The project is licensed under [Apache 2.0](https://github.com/teja499-tech/vega-sdd/blob/main/LICENSE).
 
 ```bash
 python -m pip install -e '.[dev]'
