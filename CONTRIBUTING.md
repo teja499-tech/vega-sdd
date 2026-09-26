@@ -7,7 +7,7 @@ Thanks for improving the framework. Please open an issue before a large behavior
 ```bash
 python -m venv .venv
 . .venv/bin/activate
-python -m pip install -e '.[dev]' build
+python -m pip install -e '.[dev]' build 'setuptools>=77'
 python -m pytest tests
 python examples/incident-service/run_benchmark.py /tmp/vega-incident
 python examples/cross-projects/run_benchmarks.py /tmp/vega-cross
