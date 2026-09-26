@@ -1,0 +1,314 @@
+{
+  "$defs": {
+    "Command": {
+      "additionalProperties": false,
+      "properties": {
+        "argv": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Argv",
+          "type": "array"
+        },
+        "timeout": {
+          "default": 300,
+          "maximum": 86400,
+          "minimum": 1,
+          "title": "Timeout",
+          "type": "integer"
+        },
+        "env_names": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Env Names",
+          "type": "array"
+        },
+        "run_at": {
+          "default": "task",
+          "enum": [
+            "task",
+            "release"
+          ],
+          "title": "Run At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "argv"
+      ],
+      "title": "Command",
+      "type": "object"
+    },
+    "Component": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "path": {
+          "default": ".",
+          "title": "Path",
+          "type": "string"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        },
+        "checks": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Command"
+          },
+          "title": "Checks",
+          "type": "object"
+        },
+        "waivers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Waivers",
+          "type": "object"
+        },
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Command"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact"
+        }
+      },
+      "required": [
+        "id",
+        "kind"
+      ],
+      "title": "Component",
+      "type": "object"
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "properties": {
+        "deploy": {
+          "$ref": "#/$defs/Command"
+        },
+        "smoke": {
+          "$ref": "#/$defs/Command"
+        },
+        "rollback": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Command"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requires_approval": {
+          "default": true,
+          "title": "Requires Approval",
+          "type": "boolean"
+        },
+        "promote_from": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promote From"
+        }
+      },
+      "required": [
+        "deploy",
+        "smoke"
+      ],
+      "title": "Environment",
+      "type": "object"
+    },
+    "Repository": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "default": "local",
+          "enum": [
+            "local",
+            "github",
+            "command"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "repository": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Repository"
+        },
+        "base_branch": {
+          "default": "main",
+          "title": "Base Branch",
+          "type": "string"
+        },
+        "protected_branches": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Protected Branches",
+          "type": "array"
+        },
+        "branch_prefix": {
+          "default": "sdd",
+          "title": "Branch Prefix",
+          "type": "string"
+        },
+        "remote": {
+          "default": "origin",
+          "title": "Remote",
+          "type": "string"
+        },
+        "required_checks": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Checks",
+          "type": "array"
+        },
+        "require_review": {
+          "default": true,
+          "title": "Require Review",
+          "type": "boolean"
+        },
+        "allow_push": {
+          "default": false,
+          "title": "Allow Push",
+          "type": "boolean"
+        },
+        "allow_merge": {
+          "default": false,
+          "title": "Allow Merge",
+          "type": "boolean"
+        },
+        "auto_commit": {
+          "default": false,
+          "title": "Auto Commit",
+          "type": "boolean"
+        },
+        "merge_method": {
+          "default": "squash",
+          "enum": [
+            "merge",
+            "squash",
+            "rebase"
+          ],
+          "title": "Merge Method",
+          "type": "string"
+        },
+        "provider_commands": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Command"
+          },
+          "title": "Provider Commands",
+          "type": "object"
+        }
+      },
+      "title": "Repository",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "components": {
+      "items": {
+        "$ref": "#/$defs/Component"
+      },
+      "minItems": 1,
+      "title": "Components",
+      "type": "array"
+    },
+    "repo": {
+      "$ref": "#/$defs/Repository"
+    },
+    "environments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Environment"
+      },
+      "title": "Environments",
+      "type": "object"
+    },
+    "setup": {
+      "items": {
+        "$ref": "#/$defs/Command"
+      },
+      "title": "Setup",
+      "type": "array"
+    },
+    "agent_timeout": {
+      "default": 1800,
+      "maximum": 86400,
+      "minimum": 1,
+      "title": "Agent Timeout",
+      "type": "integer"
+    },
+    "max_tasks_per_run": {
+      "default": 50,
+      "maximum": 10000,
+      "minimum": 1,
+      "title": "Max Tasks Per Run",
+      "type": "integer"
+    },
+    "protected_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Protected Paths",
+      "type": "array"
+    }
+  },
+  "required": [
+    "components"
+  ],
+  "title": "Workspace",
+  "type": "object"
+}

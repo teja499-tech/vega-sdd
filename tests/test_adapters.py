@@ -1,0 +1,27 @@
+from pathlib import Path
+
+from universal_sdd.adapters.cursor import CursorAdapter
+from universal_sdd.adapters.codex import CodexAdapter
+from universal_sdd.adapters.claude import ClaudeAdapter
+
+
+def test_cursor_command_is_bounded_and_structured(tmp_path: Path):
+    a = CursorAdapter(tmp_path)
+    # build_command may consult capabilities, so assert shape only if command exists/falls back.
+    cmd = a.build_command("hello", writable=False, mode="plan")
+    assert "--output-format" in cmd
+    assert "--workspace" in cmd
+    assert "--mode" in cmd
+
+
+def test_codex_command_uses_json_and_full_auto_for_write(tmp_path: Path):
+    cmd = CodexAdapter(tmp_path).build_command("hello", writable=True)
+    assert cmd[:3] == ["codex", "exec", "--json"]
+    assert cmd[3:5] == ["--sandbox", "workspace-write"]
+    assert CodexAdapter(tmp_path).build_command("inspect", writable=False)[3:5] == ["--sandbox", "read-only"]
+
+
+def test_claude_command_uses_stream_json(tmp_path: Path):
+    cmd = ClaudeAdapter(tmp_path).build_command("hello", writable=False, mode="plan")
+    assert "stream-json" in cmd
+    assert "plan" in cmd

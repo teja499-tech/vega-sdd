@@ -1,0 +1,206 @@
+{
+  "SYSTEM_OVERVIEW": {
+    "status": "documented",
+    "summary": "Incident Desk is a single-tenant incident tracking API for internal operators. These documents describe the benchmark reference design; automated tests do not certify a production deployment.",
+    "sections": {
+      "Purpose and scope": "Operators create incidents, list recent incidents with pagination, and change an incident between open and resolved. The scope excludes user registration, multiple tenants, notifications, dashboards and high availability. Requirements REQ-001 through REQ-006 map to Storage, API and Operations features.",
+      "Users and workflows": "An operator supplies X-API-Key to POST /incidents with a title, receives its numeric identifier, then uses GET /incidents to retrieve records. PATCH /incidents/{id} changes status. A supervisor probes GET /healthz without an API key to determine whether the process can read storage.",
+      "System boundaries": "The Python WSGI process owns request validation and a local SQLite database. Runtime configuration supplies the shared API key, database path and port. TLS termination and secret delivery belong to external deployment infrastructure and are not implemented by the reference service."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [],
+    "not_applicable_reason": ""
+  },
+  "HLD": {
+    "status": "documented",
+    "summary": "The approved reference architecture is one Python service and one SQLite file on a single host.",
+    "sections": {
+      "Components and responsibilities": "service.py defines create_app and HTTP routing. store.py encapsulates SQLite connection creation and SQL statements. The WSGI reference server runs local acceptance tests; production serving infrastructure requires a separate deployment choice.",
+      "Interactions and data flows": "A request reaches the WSGI application, passes authentication (except health), validates route-specific data, and invokes Store. Store opens a connection, executes parameterized SQL and returns records. The application serializes a JSON response.\n\n```mermaid\nflowchart TD\n A[Operator] --> B[WSGI application]\n B --> C[Store]\n C --> D[(SQLite file)]\n E[Health probe] --> B\n```",
+      "Deployment topology": "The acceptance server binds 127.0.0.1 and defaults to port 8080. The intended production topology puts a supported WSGI server behind a TLS proxy with a persistent local volume. No cloud resource, orchestrator or highly available database is provisioned by this benchmark.",
+      "Quality attributes and tradeoffs": "SQLite avoids a separate database service and supports restart persistence. Short transactions and a five-second connection timeout bound ordinary database lock waits. Single-host storage limits scaling and resilience. Moving to a managed multi-host database is an architectural change, not an implicit upgrade."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [],
+    "not_applicable_reason": ""
+  },
+  "LLD": {
+    "status": "documented",
+    "summary": "The application factory accepts an explicit database path and API key, which enables isolated acceptance tests.",
+    "sections": {
+      "Modules and interfaces": "create_app(path, api_key) builds a Store and returns a WSGI callable. Store exposes create(title), list(limit=20, offset=0), update(identifier, status) and health(). The HTTP layer owns title/status validation; direct Store callers are not protected by those checks.",
+      "Key execution flows": "POST authenticates, reads at most 4096 bytes, decodes a JSON object, validates a nonblank title of at most 120 characters, trims it, and inserts status open. GET parses integer pagination and returns records in descending ID order. PATCH validates open/resolved, updates one identifier and returns 404 when no row exists.",
+      "Validation and failure handling": "The service rejects an absent API key at factory construction. Requests with bad credentials return 401. Value, type and Unicode errors return 400. Other exceptions return a generic 503 without internal details. Unknown routes return 404. No automatic retry is implemented.",
+      "Concurrency and idempotency": "Each Store method opens its own SQLite connection. Write connection contexts commit or roll back transactions. POST has no idempotency key, so retrying after an uncertain response can duplicate an incident. A status update sets an absolute value but has no optimistic version check. The reference WSGI server is not a concurrency qualification."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [],
+    "not_applicable_reason": ""
+  },
+  "DATABASE_DESIGN": {
+    "status": "draft",
+    "summary": "The reference schema has one incident table, created if absent by Store initialization.",
+    "sections": {
+      "Entities and relationships": "incident is the only persistent entity. There are no foreign keys or tenant/user relationships. Each row represents one incident; deleting incidents is outside the current API.\n\n```mermaid\nerDiagram\n INCIDENT {\n  INTEGER id PK\n  TEXT title\n  TEXT status\n }\n```",
+      "Fields and constraints": "| Column | Type | Constraint | Meaning |\n|---|---|---|---|\n| id | INTEGER | PRIMARY KEY | SQLite row identifier |\n| title | TEXT | NOT NULL | Operator title |\n| status | TEXT | NOT NULL | Application accepts open or resolved |\n\nNo database CHECK constraint enforces status or title length. Those checks exist in the HTTP layer; direct database writes can bypass them.",
+      "Indexes and access patterns": "The INTEGER PRIMARY KEY supplies identifier lookup and ordering. Listing uses ORDER BY id DESC LIMIT ? OFFSET ?. There are no secondary indexes or text filters. Offset pagination may become costly with large offsets; no measured production capacity is claimed.",
+      "Migrations and retention": "Initialization uses CREATE TABLE IF NOT EXISTS, with no versioned migration runner. Changing the API title limit does not rewrite existing rows. Production retention and schema migration ownership remain unresolved. The operations reference recommends SQLite online backup and a tested restore to a new path."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "Retention policy and versioned schema migration process require project-owner decisions before production."
+    ],
+    "not_applicable_reason": ""
+  },
+  "API_DESIGN": {
+    "status": "documented",
+    "summary": "The reference HTTP API uses JSON and a shared X-API-Key header, except for health probes.",
+    "sections": {
+      "Contracts and authentication": "| Method | Route | Auth | Success |\n|---|---|---|---|\n| GET | /healthz | None | 200 |\n| POST | /incidents | X-API-Key | 201 |\n| GET | /incidents | X-API-Key | 200 |\n| PATCH | /incidents/{id} | X-API-Key | 200 |\n\nCredentials are compared using hmac.compare_digest. Per-user authorization is not implemented.",
+      "Requests and responses": "POST body {\"title\":\"API unavailable\"} returns {\"id\":1,\"title\":\"API unavailable\",\"status\":\"open\"}. Titles must be nonblank and at most 120 characters before trimming. GET accepts limit 1..100 (default 20) and offset >=0 (default 0), returning {\"items\":[...]}. PATCH body {\"status\":\"resolved\"} returns {\"updated\":true}. Health returns {\"status\":\"ok\"}.",
+      "Errors and compatibility": "Errors use an error string except an absent PATCH record, which returns {\"updated\":false} with 404. Bad credentials return 401; invalid input returns 400; unexpected failures return 503. There is no API version negotiation or compatibility policy yet. The title-limit change affects new writes while retaining old data."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [],
+    "not_applicable_reason": ""
+  },
+  "SECURITY": {
+    "status": "draft",
+    "summary": "The fixture covers API-key enforcement, bounded bodies, parameterized SQL and generic server errors.",
+    "sections": {
+      "Trust boundaries and threats": "Untrusted HTTP requests cross the application boundary into local storage. Relevant threats include unauthorized access, SQL injection, malformed JSON, large bodies, leaked secrets and stolen database backups. TLS, network access policy and denial-of-service protection are deployment responsibilities outside this fixture.",
+      "Access control and secrets": "One shared runtime API_KEY protects incident endpoints. Never commit it or include it in command arguments or application logs. Rotation in the reference operations notes requires runtime replacement and restart. There are no individual identities, permission levels, or tenant isolation controls.",
+      "Privacy and audit": "Titles may contain sensitive operational details. There is no redaction policy, retention enforcement or actor-level application audit trail. The SDD engineering changelog records development actions, not end-user access to incident data. These concerns must be resolved for the intended deployment."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "Private reporting contact, data classification, access-audit requirements and rate limiting are unresolved."
+    ],
+    "not_applicable_reason": ""
+  },
+  "OPERATIONS": {
+    "status": "draft",
+    "summary": "Local acceptance execution is documented; production readiness requires infrastructure and restore validation.",
+    "sections": {
+      "Configuration and deployment": "API_KEY is required. DB_PATH defaults to incidents.db and PORT defaults to 8080. For local acceptance run python3 service.py with these values injected into the environment. For production select a supported WSGI server and TLS proxy, run as an unprivileged account, and persist the database on a protected volume.",
+      "Monitoring and alerts": "GET /healthz runs a database query and returns 200 if it succeeds. Storage failure results in 503. No metrics exporter, dashboard, error-rate alert or paging destination is configured. Operators must define availability and latency objectives before choosing alert thresholds.",
+      "Backup and restore": "Use the SQLite online backup API; encrypt and protect the resulting copy. Test restoration to a new file with the service stopped before switching DB_PATH, then check health and compare incident counts. No recovery time, recovery point or live restore drill is evidenced by the benchmark.",
+      "Incident response and rollback": "Stop admitting traffic, preserve diagnostic evidence without keys, and assess database availability. Roll back code only after checking compatibility with the existing schema. Replacing the database requires a validated restore plan and explicit data-loss assessment. No on-call owner or runbook executor is assigned."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "Production hosting, server selection, alert ownership, RPO/RTO and tested restoration remain open."
+    ],
+    "not_applicable_reason": ""
+  },
+  "TEST_PLAN": {
+    "status": "documented",
+    "summary": "The reference suite combines direct persistence tests and real HTTP acceptance requests.",
+    "sections": {
+      "Acceptance and integration": "Run python3 -m unittest discover -s acceptance -v from the generated project. Storage tests exercise insertion, ordering, status updates and persistence after reopening. HTTP tests launch the WSGI application and exercise authentication, validation, pagination, health and missing records.",
+      "Performance and security": "An intentionally wrong authentication status is introduced by the scripted implementation fixture; the controller must detect failing HTTP tests and repair it. This is functional verification, not penetration testing, load testing or production server qualification.",
+      "Test data and environments": "Tests use temporary SQLite databases and local HTTP ports. The benchmark runs in separate CLI subprocesses to verify pause/resume and approved requirement changes. It uses scripted agent output, so it does not prove autonomous model-generated design or provider integration."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [],
+    "not_applicable_reason": ""
+  },
+  "EXISTING_SYSTEM": {
+    "status": "draft",
+    "summary": "For existing applications, this section is a baseline of the inspected reference files, not a claim that every external service has been discovered.",
+    "sections": {
+      "Observed current behavior": "The reference service exposes create/list/update incidents and health routes; Store creates a single incident table and commits per-method transactions. The initial source uses a 120-character title maximum. Generated benchmark work can later change that limit to 80 through an approved requirement change.",
+      "Evidence and unknowns": "Inspect service.py:create_app, store.py:Store and OPERATIONS.md. These files establish local API/storage behavior only. They do not establish real deployment configuration, production traffic, legacy consumers, operational ownership or recovery capability.",
+      "Intended changes and compatibility": "Adopting SDD documents the baseline and plans changes against explicit requirements. Existing source files and enterprise policies must remain intact during init. A title-limit reduction rejects newly submitted overlong titles but retains previously stored data.",
+      "Migration and rollback": "No schema migration is required for the title-limit change. Rollback restores the previous validation limit without rewriting rows. For broader adoption, inventory integrations and schema versions, capture acceptance baselines and plan reversible migrations before approving changes."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "Deployment inventory and external consumer compatibility are not evidenced by the reference repository."
+    ],
+    "not_applicable_reason": ""
+  },
+  "CONTRIBUTING": {
+    "status": "draft",
+    "summary": "Use requirements and task IDs to make development history understandable to future maintainers.",
+    "sections": {
+      "Local setup": "The reference application uses Python standard-library modules. Supply a local test API key through the environment and a disposable DB_PATH. Run the acceptance suite before submitting changes. Production dependency selection and supported runtime pinning require the deployment team.",
+      "Development and review workflow": "Use sdd status to find active work, sdd change for approved intent changes, and sdd docs check for documentation gaps. Keep implementation repairs separate from requirement changes. On authorized Git commits add SDD-Task: TASK-Fxxx-xxx as a trailer; sdd link-commit can associate historical commits explicitly.",
+      "Ownership and escalation": "The framework does not invent a CODEOWNERS team or reporting contact. The repository owner must name maintainers, private security reporting recipients and production approvers. Escalate changes to data retention, public behavior or architecture through the recorded change flow."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "Named maintainers and code ownership are not configured."
+    ],
+    "not_applicable_reason": ""
+  },
+  "RELEASE_PLAN": {
+    "status": "draft",
+    "summary": "Passing the benchmark is a development milestone, not authorization to release an enterprise service.",
+    "sections": {
+      "Release criteria": "The canonical criteria require acceptance tests and external production deployment review. Documentation gaps, API consumer compatibility, operational restoration, secret delivery and server hardening must be reviewed for the target environment. No release certification is implied by the documented status field.",
+      "Versioning and release notes": "Keep versioned release notes separately from the continuous SDD changelog. Select relevant task IDs, full commit SHAs, requirement changes and verification evidence for each release. The framework does not automatically create tags, publish packages or push Git commits.",
+      "Rollout and rollback": "Deploy first to a representative staging environment with a protected test database, validate health and API behavior, then use the approved deployment process. Maintain a code rollback version and tested database restoration plan. Changes with irreversible migrations need explicit migration design."
+    },
+    "sources": [
+      "PRD.md",
+      "service.py (reference implementation)",
+      "store.py (reference implementation)",
+      "OPERATIONS.md"
+    ],
+    "gaps": [
+      "No signed release, live environment test or deployment approval is provided by this benchmark."
+    ],
+    "not_applicable_reason": ""
+  }
+}

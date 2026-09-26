@@ -1,0 +1,8 @@
+include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md AGENTS.md NOTICE
+recursive-include docs *.md *.json
+recursive-include examples *.py *.md *.json
+recursive-include tests *.py
+global-exclude __pycache__ *.py[cod] *.log .DS_Store
+prune audit
+prune audit-v012
+prune audit-v020

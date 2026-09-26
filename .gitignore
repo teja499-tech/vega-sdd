@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+dist/
+build/
+*.egg-info/
+.sdd/runtime/process.json
+.sdd/runtime/*.lock
+audit/
+audit-v*/
+*.log
+.tox/
+.ruff_cache/
