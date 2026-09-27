@@ -4,7 +4,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .base import AgentAdapter
+from .base import AgentAdapter, unrestricted_agent_allowed
 from ..models import AgentCapabilities
 
 
@@ -41,11 +41,9 @@ class CursorAdapter(AgentAdapter):
             "--model",
             "auto",
         ]
-        # Non-interactive SDD runs have no TTY for workspace-trust or command
-        # approval prompts. --trust is required for every print-mode call;
-        # writable implement/repair also needs --force so shell/write tools
-        # do not hang until the 1800s timeout.
-        if writable and mode != "plan":
+        # --trust confirms the workspace. --force is unrestricted command/write
+        # approval and requires an explicit owner opt-in.
+        if writable and mode != "plan" and unrestricted_agent_allowed(self.root):
             cmd.append("--force")
         if mode == "plan" or not writable:
             cmd += ["--mode", "plan" if mode == "plan" else "ask"]

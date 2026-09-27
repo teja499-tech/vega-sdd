@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 
-from .base import AgentAdapter
+from .base import AgentAdapter, unrestricted_agent_allowed
 from ..models import AgentCapabilities
 
 
@@ -23,14 +23,14 @@ class GeminiAdapter(AgentAdapter):
             version=version,
             notes=[
                 "Uses Gemini CLI one-shot `-p` prompt mode.",
-                "Writable runs enable --yolo so SDD is not blocked on TTY approvals.",
+                "Writable runs add --yolo only when allow_unrestricted_agent is set.",
                 "Read-only review/ask uses --sandbox when the local CLI supports it.",
             ],
         )
 
     def build_command(self, prompt: str, *, writable: bool, mode: str = "agent") -> list[str]:
         cmd = ["gemini", "-p", prompt]
-        if writable:
+        if writable and unrestricted_agent_allowed(self.root):
             cmd.append("--yolo")
         else:
             cmd.append("--sandbox")

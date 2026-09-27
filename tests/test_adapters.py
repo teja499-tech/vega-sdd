@@ -19,7 +19,7 @@ def test_cursor_command_is_bounded_and_structured(tmp_path: Path):
     assert cmd[cmd.index("--model") + 1] == "auto"
     write_cmd = a.build_command("hello", writable=True, mode="agent")
     assert "--trust" in write_cmd
-    assert "--force" in write_cmd
+    assert "--force" not in write_cmd
     assert "--mode" not in write_cmd
     assert write_cmd[write_cmd.index("--model") + 1] == "auto"
 
@@ -40,6 +40,6 @@ def test_claude_command_uses_stream_json(tmp_path: Path):
 def test_gemini_and_copilot_honor_read_write_contract(tmp_path: Path):
     write = GeminiAdapter(tmp_path).build_command("hello", writable=True)
     read = GeminiAdapter(tmp_path).build_command("hello", writable=False)
-    assert "--yolo" in write and "--sandbox" in read
-    assert "--allow-all" in CopilotAdapter(tmp_path).build_command("hello", writable=True)
+    assert "--yolo" not in write and "--sandbox" in write and "--sandbox" in read
+    assert "--allow-all" not in CopilotAdapter(tmp_path).build_command("hello", writable=True)
     assert "--allow-all" not in CopilotAdapter(tmp_path).build_command("hello", writable=False)

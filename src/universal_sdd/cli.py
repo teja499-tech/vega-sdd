@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import shutil
@@ -15,6 +16,7 @@ from rich.table import Table
 
 from . import __version__
 from .adapters import get_adapter
+from .adapters.base import UNRESTRICTED_ENV
 from .artifacts import project_context, write_architecture, write_spec_bundle
 from .json_utils import extract_json, parse_structured
 from .journal import Journal
@@ -180,8 +182,6 @@ def init(
     """Initialize SDD from a PRD through product discovery and an architecture workshop."""
     root = _root(root)
     paths = SDDPaths(root)
-    if paths.config_file.exists() and not force:
-        _fail("SDD is already initialized. Use --force only if you intentionally want to regenerate setup artifacts.")
     prd_path = prd if prd.is_absolute() else root / prd
     if not prd_path.exists():
         _fail(f"PRD not found: {prd_path}")
@@ -189,11 +189,6 @@ def init(
     if not prd_text.strip():
         _fail("PRD is empty.")
 
-    if force and paths.sdd.exists():
-        backup = root / f".sdd-backup-{uuid.uuid4().hex[:8]}"
-        shutil.copytree(paths.sdd, backup)
-        shutil.rmtree(paths.sdd)
-        paths = SDDPaths(root)
     console.print(Panel.fit("Vega SDD · Project Initialization", subtitle=f"v{__version__}"))
     if agent is None:
         if yes:
@@ -212,6 +207,17 @@ def init(
             raw = typer.prompt("Project type (new/existing)", default="existing" if has_code else "new")
             project_kind = ProjectKind(raw.lower())
 
+    if paths.config_file.exists() and not force:
+        existing = load_project_state(paths)
+        if existing.initialized:
+            _fail("SDD is already initialized. Use --force only if you intentionally want to regenerate setup artifacts.")
+
+    if force and paths.sdd.exists() and load_project_state(paths).initialized:
+        backup = root / f".sdd-backup-{uuid.uuid4().hex[:8]}"
+        shutil.copytree(paths.sdd, backup)
+        shutil.rmtree(paths.sdd)
+        paths = SDDPaths(root)
+
     write_scaffold(root)
     config = SDDConfig(
         project_name=root.name,
@@ -221,99 +227,114 @@ def init(
     )
     save_config(paths, config)
     state = load_project_state(paths)
-    state.initialized = True
+    state.initialized = False
+    state.run_status = RunStatus.initializing
     save_project_state(paths, state)
 
-    adapter = get_adapter(agent, root)
-    caps = adapter.capabilities()
-    if not caps.installed:
-        _fail(f"{agent.value} CLI is not installed or not on PATH. Scaffold/config were created; install the agent and rerun `sdd init --force`.")
-    console.print(f"Agent: [bold]{agent.value}[/bold] ({caps.version or 'version unknown'})")
+    def _fail_init(message: str, code: int = 1) -> None:
+        failed = load_project_state(paths)
+        failed.initialized = False
+        failed.run_status = RunStatus.failed
+        save_project_state(paths, failed)
+        _fail(message, code)
 
-    repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
-    console.print("\n[bold]1/4 Product discovery[/bold]")
-    product = _require_model(
-        adapter,
-        product_discovery_prompt(prd_text, repo_summary),
-        ProductModel.model_validate,
-        "product discovery",
-        paths,
-    )
-
-    from .clarifications import record_architecture_decisions, record_product_questions
-    answers: list[tuple[str, str]] = []
-    if product.open_questions:
-        console.print(f"Found {len(product.open_questions)} material clarification question(s).")
-        for question in product.open_questions:
-            if yes:
-                answers.append((question, "Deferred"))
-            else:
-                answers.append((question, typer.prompt(question, default="defer")))
-        record_product_questions(paths, product, answers)
-    clarifications = [f"{qid}: {q}\nA: {a}" for qid, (q, a) in ((f"Q{i}", pair) for i, pair in enumerate(answers, 1))]
-    augmented_prd = prd_text + ("\n\n# SDD Clarifications\n" + "\n\n".join(clarifications) if clarifications else "")
-
-    console.print("\n[bold]2/4 Architecture workshop[/bold]")
-    def _validate_decisions(raw):
-        if not isinstance(raw, list):
-            raise ValueError("Architecture output must be a JSON array")
-        return [ArchitectureDecision.model_validate(x) for x in raw]
-    decisions = _require_model(
-        adapter,
-        architecture_prompt(augmented_prd, repo_summary),
-        _validate_decisions,
-        "architecture",
-        paths,
-    )
-    decisions = _select_architecture(adapter, augmented_prd, decisions, yes)
-    write_architecture(paths, decisions)
-    record_architecture_decisions(paths, decisions)
-
-    deferred = [d for d in decisions if d.status == DecisionStatus.deferred]
-    if deferred:
-        console.print(f"[yellow]{len(deferred)} architecture decision(s) remain deferred. Specs will record them as unresolved.[/yellow]")
-
-    console.print("\n[bold]3/4 Specification generation[/bold]")
-    bundle = _require_model(
-        adapter,
-        spec_bundle_prompt(augmented_prd, decisions, repo_summary),
-        SpecBundle.model_validate,
-        "specification bundle",
-        paths,
-    )
+    finished = False
     try:
-        write_spec_bundle(paths, bundle)
-    except ValueError as exc:
-        state = load_project_state(paths)
-        state.run_status = RunStatus.blocked
-        save_project_state(paths, state)
-        _fail(str(exc), 2)
+        adapter = get_adapter(agent, root)
+        caps = adapter.capabilities()
+        if not caps.installed:
+            _fail_init(f"{agent.value} CLI is not installed or not on PATH. Scaffold/config were created; install the agent and rerun `sdd init`.")
+        console.print(f"Agent: [bold]{agent.value}[/bold] ({caps.version or 'version unknown'})")
 
-    report = validate_traceability(paths)
-    if not report.ok:
-        state = load_project_state(paths)
-        state.run_status = RunStatus.blocked
-        save_project_state(paths, state)
-        console.print("[red]Traceability validation failed.[/red]")
-        for e in report.errors:
-            console.print(f"  • {e}")
-        raise typer.Exit(2)
-    publish_status(paths)
-    Journal(paths.event_log).append("project_initialized", agent=agent.value, requirements=len(bundle.requirements), features=len(bundle.features))
+        repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
+        console.print("\n[bold]1/4 Product discovery[/bold]")
+        product = _require_model(
+            adapter,
+            product_discovery_prompt(prd_text, repo_summary),
+            ProductModel.model_validate,
+            "product discovery",
+            paths,
+        )
 
-    from .documentation import check_docs
-    doc_gaps = check_docs(paths)
-    console.print(f"Human docs: .sdd/docs/README.md ({len(doc_gaps)} documentation gap(s); run sdd docs check)")
-    console.print("\n[bold]4/4 Readiness review[/bold]")
-    console.print(f"✓ Requirements: {len(bundle.requirements)}")
-    console.print(f"✓ Features: {len(bundle.features)}")
-    console.print(f"✓ Architecture decisions: {len(decisions)}")
-    console.print(f"✓ Traceability: valid ({len(report.warnings)} warning(s))")
-    if bundle.product.open_questions or deferred:
-        console.print("[yellow]Project contains unresolved questions/decisions. Review before autonomous development.[/yellow]")
-    else:
-        console.print("[green]Project is ready for implementation.[/green]")
-    console.print("Next: [bold]sdd start[/bold]  |  inspect: [bold]sdd status[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold]")
+        from .clarifications import record_architecture_decisions, record_product_questions
+        answers: list[tuple[str, str]] = []
+        if product.open_questions:
+            console.print(f"Found {len(product.open_questions)} material clarification question(s).")
+            for question in product.open_questions:
+                if yes:
+                    answers.append((question, "Deferred"))
+                else:
+                    answers.append((question, typer.prompt(question, default="defer")))
+            record_product_questions(paths, product, answers)
+        clarifications = [f"{qid}: {q}\nA: {a}" for qid, (q, a) in ((f"Q{i}", pair) for i, pair in enumerate(answers, 1))]
+        augmented_prd = prd_text + ("\n\n# SDD Clarifications\n" + "\n\n".join(clarifications) if clarifications else "")
+
+        console.print("\n[bold]2/4 Architecture workshop[/bold]")
+        def _validate_decisions(raw):
+            if not isinstance(raw, list):
+                raise ValueError("Architecture output must be a JSON array")
+            return [ArchitectureDecision.model_validate(x) for x in raw]
+        decisions = _require_model(
+            adapter,
+            architecture_prompt(augmented_prd, repo_summary),
+            _validate_decisions,
+            "architecture",
+            paths,
+        )
+        decisions = _select_architecture(adapter, augmented_prd, decisions, yes)
+        write_architecture(paths, decisions)
+        record_architecture_decisions(paths, decisions)
+
+        deferred = [d for d in decisions if d.status == DecisionStatus.deferred]
+        if deferred:
+            console.print(f"[yellow]{len(deferred)} architecture decision(s) remain deferred. Specs will record them as unresolved.[/yellow]")
+
+        console.print("\n[bold]3/4 Specification generation[/bold]")
+        bundle = _require_model(
+            adapter,
+            spec_bundle_prompt(augmented_prd, decisions, repo_summary),
+            SpecBundle.model_validate,
+            "specification bundle",
+            paths,
+        )
+        try:
+            write_spec_bundle(paths, bundle)
+        except ValueError as exc:
+            _fail_init(str(exc), 2)
+
+        report = validate_traceability(paths)
+        if not report.ok:
+            console.print("[red]Traceability validation failed.[/red]")
+            for e in report.errors:
+                console.print(f"  • {e}")
+            _fail_init("Traceability validation failed.", 2)
+        publish_status(paths)
+        Journal(paths.event_log).append("project_initialized", agent=agent.value, requirements=len(bundle.requirements), features=len(bundle.features))
+        ready = load_project_state(paths)
+        ready.initialized = True
+        ready.run_status = RunStatus.ready
+        save_project_state(paths, ready)
+        finished = True
+
+        from .documentation import check_docs
+        doc_gaps = check_docs(paths)
+        console.print(f"Human docs: .sdd/docs/README.md ({len(doc_gaps)} documentation gap(s); run sdd docs check)")
+        console.print("\n[bold]4/4 Readiness review[/bold]")
+        console.print(f"✓ Requirements: {len(bundle.requirements)}")
+        console.print(f"✓ Features: {len(bundle.features)}")
+        console.print(f"✓ Architecture decisions: {len(decisions)}")
+        console.print(f"✓ Traceability: valid ({len(report.warnings)} warning(s))")
+        if bundle.product.open_questions or deferred:
+            console.print("[yellow]Project contains unresolved questions/decisions. Review before autonomous development.[/yellow]")
+        else:
+            console.print("[green]Project is ready for implementation.[/green]")
+        console.print("Next: [bold]sdd start[/bold]  |  inspect: [bold]sdd status[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold]")
+    finally:
+        if not finished:
+            failed = load_project_state(paths)
+            failed.initialized = False
+            failed.run_status = RunStatus.failed
+            save_project_state(paths, failed)
 
 
 @app.command("scaffold")
@@ -372,6 +393,10 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
         except ImportError:
             headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
         console.print(f"Headroom: {headroom_state}")
+        if cfg.allow_unrestricted_agent:
+            console.print("[yellow]allow_unrestricted_agent is on: writable agents receive vendor auto-approve flags. Keep the run isolated.[/yellow]")
+        else:
+            console.print("Unrestricted agent flags: off (set allow_unrestricted_agent or pass --allow-unrestricted on start)")
     else:
         console.print("SDD not initialized in this directory.")
 
@@ -453,9 +478,13 @@ def start(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1, help="Pause after N verified tasks."),
     accept_deferred: bool = typer.Option(False, "--accept-deferred", help="Sign deferred clarifications as accepted defaults."),
+    allow_unrestricted: bool = typer.Option(False, "--allow-unrestricted", help="Opt in to vendor auto-approve flags for this run only."),
 ) -> None:
     """Run autonomous task implementation/review/repair in the foreground."""
     root = _root(root)
+    if allow_unrestricted:
+        os.environ[UNRESTRICTED_ENV] = "1"
+        console.print("[yellow]Unrestricted agent flags enabled for this process. Isolate the workspace.[/yellow]")
     console.print("Starting SDD development. Ctrl+C requests a safe pause.")
     try:
         state = run_development(root, max_tasks=max_tasks, on_event=_event_printer, accept_deferred=accept_deferred)
@@ -472,10 +501,11 @@ def resume(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1),
     accept_deferred: bool = typer.Option(False, "--accept-deferred"),
+    allow_unrestricted: bool = typer.Option(False, "--allow-unrestricted"),
 ) -> None:
     """Resume from durable repository state; no prior chat context is required."""
     root = _root(root)
-    start(root=root, max_tasks=max_tasks, accept_deferred=accept_deferred)
+    start(root=root, max_tasks=max_tasks, accept_deferred=accept_deferred, allow_unrestricted=allow_unrestricted)
 
 
 @app.command()

@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 from .models import Feature, SDDConfig, Task
+
+_UNSAFE_PATH_CHARS = set(";&|`$()<>\\\"'\n\r\t")
 
 
 def compact_output(text: str, limit: int = 2000) -> str:
@@ -34,38 +37,71 @@ def compact_output(text: str, limit: int = 2000) -> str:
     return snippet[-limit:]
 
 
-def scoped_test_command(config: SDDConfig, task: Task) -> str | None:
-    if task.check_command:
-        return task.check_command
-    command = config.test_command
-    if not command:
+def safe_repo_paths(root: Path, relatives: list[str]) -> list[str]:
+    """Return relative paths that resolve inside root. Reject shell metacharacters."""
+    root = root.resolve()
+    safe: list[str] = []
+    for rel in relatives:
+        if not rel or not isinstance(rel, str):
+            continue
+        candidate = Path(rel)
+        if candidate.is_absolute() or any(ch in rel for ch in _UNSAFE_PATH_CHARS):
+            continue
+        if ".." in candidate.parts:
+            continue
+        resolved = (root / candidate).resolve()
+        try:
+            resolved.relative_to(root)
+        except ValueError:
+            continue
+        safe.append(candidate.as_posix())
+    return safe
+
+
+def owner_command_argv(command: str | None) -> list[str]:
+    """Split a project-owner command. Never interpolate model text into this string."""
+    if not command or not command.strip():
+        return []
+    return shlex.split(command, posix=True)
+
+
+def scoped_test_argv(root: Path, config: SDDConfig, task: Task) -> list[str] | None:
+    argv = owner_command_argv(config.test_command)
+    if not argv:
         return None
-    paths = [p for p in task.check_paths if p and ".." not in p]
-    if paths and "pytest" in command:
-        return f"{command} {' '.join(paths)}"
-    return command
+    paths = safe_repo_paths(root, task.check_paths)
+    if paths and any("pytest" in part for part in argv):
+        return argv + paths
+    return argv
+
+
+def scoped_test_command(config: SDDConfig, task: Task, root: Path | None = None) -> str | None:
+    """Compatibility wrapper. Prefer scoped_test_argv for execution."""
+    argv = scoped_test_argv(root or Path("."), config, task)
+    return shlex.join(argv) if argv else None
 
 
 def infer_check_paths(root: Path, task: Task, feature: Feature) -> list[str]:
-    if task.check_paths:
-        return [p for p in task.check_paths if p and ".." not in p]
+    declared = safe_repo_paths(root, task.check_paths)
+    if declared:
+        return declared
     candidates: list[str] = []
-    for rel in [*task.working_set, *feature.target_files]:
-        if not rel or ".." in rel:
-            continue
+    for rel in safe_repo_paths(root, [*task.working_set, *feature.target_files]):
         path = root / rel
         if path.is_file() and ("test" in rel or rel.endswith("_test.py")):
             candidates.append(rel)
     return candidates[:15]
 
 
-def commands_for_task(config: SDDConfig, task: Task) -> list[tuple[str, str]]:
-    rows: list[tuple[str, str]] = []
-    test = scoped_test_command(config, task)
+def commands_for_task(root: Path, config: SDDConfig, task: Task) -> list[tuple[str, list[str]]]:
+    rows: list[tuple[str, list[str]]] = []
+    test = scoped_test_argv(root, config, task)
     if test:
         rows.append(("test", test))
-    if config.lint_command:
-        rows.append(("lint", config.lint_command))
-    if config.typecheck_command:
-        rows.append(("typecheck", config.typecheck_command))
+    lint = owner_command_argv(config.lint_command)
+    if lint:
+        rows.append(("lint", lint))
+    typecheck = owner_command_argv(config.typecheck_command)
+    if typecheck:
+        rows.append(("typecheck", typecheck))
     return rows

@@ -4,6 +4,12 @@ This file summarizes human-visible changes. Individual project specifications an
 
 ## [Unreleased]
 
+- Keep failed `sdd init` unmarked as initialized and allow a non-destructive rerun without `--force`.
+- Execute owner test commands as argv (`shell=False`) and reject model `check_paths` that leave the repo or include shell metacharacters.
+- Gate Cursor `--force`, Gemini `--yolo`, and Copilot `--allow-all` behind `allow_unrestricted_agent` or `sdd start --allow-unrestricted`.
+- Make the MCP `sdd_change` tool preview-only so an IDE model cannot mint approval.
+- Generate README and developer-guide text without assuming Ollama or OpenRouter.
+
 ## [0.4.0] - 2026-09-27
 
 - Removed per-task and per-run token caps. A run records raw versus compressed size in `.sdd/state/compression-ledger.yaml` and does not pause because an estimate crossed a budget.

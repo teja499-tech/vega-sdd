@@ -174,9 +174,9 @@ def _root_readme(bundle: SpecBundle) -> str:
     return (
         f"# {bundle.product.name}\n\n{bundle.product.summary}\n\n"
         "## Prerequisites\n\n"
-        "- Runtime recorded in `.sdd/architecture/` (Python, Node, etc.)\n"
-        "- Docker Compose when the repository includes a compose file\n"
-        "- Provider keys: copy `.env.example` if present. Use Ollama locally; OpenRouter in production.\n\n"
+        "- Runtime recorded in `.sdd/architecture/` and the repository manifests\n"
+        "- Docker Compose only when the repository includes a compose file\n"
+        "- Copy `.env.example` to `.env` when that file exists; do not invent providers\n\n"
         "## Local setup\n\n"
         "1. Install dependencies from the repository manifest.\n"
         "2. Copy `.env.example` to `.env` and fill required values.\n"
@@ -202,8 +202,9 @@ def _developer_guide(bundle: SpecBundle, kind: str, fingerprint: str) -> str:
         f"Source revision: `{fingerprint}`\n",
         f"Project kind: {kind}\n",
         f"## What this system is\n\n{bundle.product.summary}\n",
-        "## Local setup\n\nCopy `.env.example` if present. Install dependencies. Run compose when available. "
-        "Use Ollama for local models and OpenRouter for hosted inference when those providers are in scope.\n",
+        "## Local setup\n\nCopy `.env.example` if present. Install dependencies from the repository manifest. "
+        "Run compose only when a compose file exists. Record model or hosted-provider commands in OPERATIONS "
+        "or an ADR before adding them here.\n",
         "## Tests\n\n" + "\n".join(f"- {item}" for item in bundle.test_strategy or ["Record a test command in `.sdd/config.yaml`."]) + "\n",
         "## Workflow\n\nUse `sdd start` for implementation, `sdd ask` for questions, and `sdd change` for ad-hoc plan changes.\n",
     ]

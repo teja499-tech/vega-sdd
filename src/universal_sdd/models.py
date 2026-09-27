@@ -37,6 +37,7 @@ class ProjectKind(str, Enum):
 
 class RunStatus(str, Enum):
     not_started = "not_started"
+    initializing = "initializing"
     ready = "ready"
     running = "running"
     paused = "paused"
@@ -78,6 +79,7 @@ class SDDConfig(BaseModel):
     lint_command: str | None = None
     typecheck_command: str | None = None
     require_resolved_clarifications: bool = True
+    allow_unrestricted_agent: bool = False
 
 
 class ArchitectureOption(BaseModel):

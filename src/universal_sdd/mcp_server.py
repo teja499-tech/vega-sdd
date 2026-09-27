@@ -31,12 +31,11 @@ def _tools() -> list[dict[str, Any]]:
         },
         {
             "name": "sdd_change",
-            "description": "Analyze an ad-hoc request and preview invalidated tasks. Does not apply unless approve=true.",
+            "description": "Analyze an ad-hoc request and preview invalidated tasks. Never applies a change; approval is a separate human CLI step.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "description": {"type": "string"},
-                    "approve": {"type": "boolean", "default": False},
                 },
                 "required": ["description"],
             },
@@ -56,7 +55,7 @@ def _call(name: str, arguments: dict[str, Any]) -> str:
         m = metrics(paths)
         return render_status(paths) + f"\nverified={m.tasks_verified}/{m.tasks_total}"
     if name == "sdd_change":
-        from .orchestrator import analyze_change, apply_change
+        from .orchestrator import analyze_change
         cr = analyze_change(root, str(arguments.get("description") or ""))
         preview = {
             "id": cr.id,
@@ -65,12 +64,10 @@ def _call(name: str, arguments: dict[str, Any]) -> str:
             "affected_features": cr.affected_features,
             "requires_approval": cr.requires_approval,
             "proposed_changes": cr.proposed_changes,
+            "status": cr.status,
+            "applied": False,
+            "next_step": "Review the preview, then run `sdd change --approve` from a human-controlled terminal if you accept the mutation.",
         }
-        if arguments.get("approve") and cr.requires_approval:
-            cr.approved = True
-            cr.status = "approved"
-            applied = apply_change(root, cr)
-            preview["status"] = applied.status
         return json.dumps(preview, indent=2)
     raise ValueError(f"Unknown tool: {name}")
 

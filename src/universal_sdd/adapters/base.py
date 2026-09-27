@@ -13,6 +13,19 @@ from typing import Callable, Iterable
 from ..models import AgentCapabilities, AgentEvent, AgentResult
 
 EventCallback = Callable[[AgentEvent], None]
+UNRESTRICTED_ENV = "SDD_ALLOW_UNRESTRICTED"
+
+
+def unrestricted_agent_allowed(root: Path) -> bool:
+    """Writable runs stay sandboxed unless the project owner opts in."""
+    flag = os.environ.get(UNRESTRICTED_ENV, "")
+    if flag.strip().lower() in {"1", "true", "yes"}:
+        return True
+    try:
+        from ..storage import SDDPaths, load_config
+        return bool(load_config(SDDPaths(root)).allow_unrestricted_agent)
+    except Exception:
+        return False
 
 
 class AgentAdapter(ABC):

@@ -113,8 +113,8 @@ def test_compression_records_savings_without_stopping(initialized):
     assert "FAILED" in out or out == text or "Full original" in out
     summary = savings_summary(initialized)
     assert summary["events"] >= 1
-    original = list((initialized.runtime / "originals").glob("*.txt"))
-    assert original and "FAILED" in original[0].read_text()
+    originals = [p for p in (initialized.runtime / "originals").glob("*.txt") if p.name != "index.txt"]
+    assert originals and any("FAILED" in p.read_text() for p in originals)
 
 
 def test_graphify_query_uses_cli_when_present(initialized, monkeypatch):
@@ -142,11 +142,12 @@ def test_token_estimate_and_gemini_copilot_commands(tmp_path: Path):
     assert estimate_tokens("abcd") == 1
     gem = GeminiAdapter(tmp_path).build_command("hello", writable=True)
     assert gem[:2] == ["gemini", "-p"]
-    assert "--yolo" in gem
+    assert "--yolo" not in gem
+    assert "--sandbox" in gem
     assert "--sandbox" in GeminiAdapter(tmp_path).build_command("hello", writable=False)
     cop = CopilotAdapter(tmp_path).build_command("hello", writable=True)
     assert cop[:2] == ["copilot", "-p"]
-    assert "--allow-all" in cop
+    assert "--allow-all" not in cop
     assert "--silent" in cop
 
 

@@ -305,8 +305,9 @@ Initialization captures lightweight repo/Git context and supplies it to product/
 - `test_command`
 - `lint_command`
 - `typecheck_command`
+- `allow_unrestricted_agent` (default false; opt-in for Cursor `--force`, Gemini `--yolo`, Copilot `--allow-all`)
 
-The approval flags document project policy. V1's CLI enforces approval for classified spec/requirement/architecture mutation.
+The approval flags document project policy. V1's CLI enforces approval for classified spec/requirement/architecture mutation. Unrestricted agent flags stay off unless the owner sets the config field or passes `sdd start --allow-unrestricted` for that process. Isolate that run; the git guard cannot prevent secret reads or network use.
 
 ## Effective operating pattern
 

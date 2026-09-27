@@ -24,7 +24,7 @@ The adapter returns normalized `AgentResult`/`AgentEvent` objects.
 
 The adapter targets Cursor CLI's `agent` command, print mode, structured JSON output, explicit workspace, `--trust` (required for non-interactive workspace confirmation), `--model auto`, and Ask/Plan modes for read-only operations.
 
-Writable tasks add `--force` so command/write tools do not wait on a TTY approval prompt. Run `sdd doctor` after major CLI updates.
+`--trust` confirms the workspace. Writable runs add `--force` only when the project owner sets `allow_unrestricted_agent: true` in `.sdd/config.yaml` or passes `sdd start --allow-unrestricted`. That is an isolation opt-in, not the default. Run `sdd doctor` after major CLI updates.
 
 ## Codex
 
@@ -40,15 +40,15 @@ Because vendor flags can evolve, the adapter is intentionally small and covered 
 
 ## Gemini CLI
 
-The adapter targets the `gemini` CLI one-shot `-p` prompt. Writable implement/repair runs add `--yolo` so SDD is not blocked on TTY approvals. Read-only review/ask adds `--sandbox`.
+The adapter targets the `gemini` CLI one-shot `-p` prompt. Writable implement/repair runs add `--yolo` only after the unrestricted-agent opt-in. Read-only review/ask adds `--sandbox`.
 
 ## GitHub Copilot CLI
 
-The adapter targets `copilot -p` with `--silent`. Writable runs add `--allow-all`; review/ask omit write approvals.
+The adapter targets `copilot -p` with `--silent`. Writable runs add `--allow-all` only after the unrestricted-agent opt-in; review/ask omit write approvals.
 
 ## IDE copilot (optional MCP)
 
-`python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change` over stdio JSON-RPC so Cursor or another IDE can use the project copilot without a TTY `sdd intervene` loop. Scaffolded Cursor commands live in `.cursor/commands/sdd-ask.md` and `sdd-change.md`.
+`python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change` over stdio JSON-RPC. `sdd_change` is preview-only; an IDE model cannot approve or apply a specification mutation. A human runs `sdd change --approve` after reviewing the invalidated-task list. Scaffolded Cursor commands live in `.cursor/commands/sdd-ask.md` and `sdd-change.md`.
 
 ## Mock
 

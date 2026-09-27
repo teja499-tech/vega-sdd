@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 import uuid
 import tempfile
@@ -32,7 +33,7 @@ from .prompts import change_analysis_prompt, implement_task_prompt, repair_task_
 from .review_policy import apply_review_policy, review_allows_progress
 from .status import load_features, publish_status
 from .storage import single_writer, SDDPaths, dump_yaml, load_config, load_project_state, load_yaml, save_project_state
-from .task_checks import commands_for_task, compact_output, infer_check_paths
+from .task_checks import commands_for_task, compact_output, infer_check_paths, owner_command_argv
 from .compress import compress_for_prompt
 from .tokens import record_usage
 from .traceability import validate_traceability
@@ -72,8 +73,10 @@ def _save_features(paths: SDDPaths, features: list[Feature]) -> None:
             dump_yaml(candidates[0] / "state.yaml", feature)
 
 
-def _run_check(command: str, root: Path, task_id: str, kind: str = "test") -> VerificationResult:
-    process = subprocess.Popen(command, cwd=root, shell=True, stdout=subprocess.PIPE,
+def _run_check(command: str | list[str], root: Path, task_id: str, kind: str = "test") -> VerificationResult:
+    argv = command if isinstance(command, list) else owner_command_argv(command)
+    display = shlex.join(argv) if argv else ""
+    process = subprocess.Popen(argv, cwd=root, shell=False, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, start_new_session=(os.name != "nt"))
     try:
         stdout, stderr = process.communicate(timeout=300)
@@ -91,7 +94,7 @@ def _run_check(command: str, root: Path, task_id: str, kind: str = "test") -> Ve
         task_id=task_id,
         kind=kind,
         status="pass" if process.returncode == 0 else "fail",
-        command=command,
+        command=display,
         summary=summary,
     )
 
@@ -121,6 +124,8 @@ def run_development(
     config = load_config(paths)
     state = load_project_state(paths)
     journal = Journal(paths.event_log)
+    if not state.initialized:
+        raise RuntimeError("Initialization is incomplete. Run `sdd init` to finish product, architecture, and spec generation.")
     assert_start_ready(paths, accept_deferred=accept_deferred)
     adapter = get_adapter(config.primary_agent, root)
     caps = adapter.capabilities()
@@ -229,14 +234,15 @@ def run_development(
             while True:
                 findings = []
                 check_evidence = []
-                for kind, command in commands_for_task(config, task):
+                for kind, command in commands_for_task(root, config, task):
+                    display = shlex.join(command)
                     try:
                         vr = _run_check(command, root, task.id, kind)
                     except subprocess.TimeoutExpired:
                         vr = VerificationResult(id=f"VER-{uuid.uuid4().hex[:8].upper()}", task_id=task.id,
-                            kind=kind, status="fail", command=command, summary="Check exceeded 300 seconds")
+                            kind=kind, status="fail", command=display, summary="Check exceeded 300 seconds")
                     _append_verification(paths, vr)
-                    journal.append("deterministic_check", task=task.id, command=command, status=vr.status)
+                    journal.append("deterministic_check", task=task.id, command=display, status=vr.status)
                     check_evidence.append(vr.id)
                     if vr.status == "fail":
                         evidence = compress_for_prompt(paths, vr.summary, label=f"{task.id}-{kind}-failure")
@@ -314,7 +320,7 @@ def run_development(
             if all(t.status == ItemStatus.verified for t in feature.tasks):
                 feature.status = ItemStatus.verified
                 if config.test_command:
-                    suite = _run_check(config.test_command, root, task.id, "test")
+                    suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
                     _append_verification(paths, suite)
                     journal.append("feature_suite", feature=feature.id, status=suite.status)
                     if suite.status == "fail":

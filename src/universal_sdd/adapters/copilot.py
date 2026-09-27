@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import shutil
 
-from .base import AgentAdapter
+from .base import AgentAdapter, unrestricted_agent_allowed
 from ..models import AgentCapabilities
 
 
@@ -23,12 +23,12 @@ class CopilotAdapter(AgentAdapter):
             version=version,
             notes=[
                 "Uses GitHub Copilot CLI `-p` prompt mode with --silent.",
-                "Writable runs pass --allow-all; read-only review omits write approvals.",
+                "Writable runs pass --allow-all only when allow_unrestricted_agent is set.",
             ],
         )
 
     def build_command(self, prompt: str, *, writable: bool, mode: str = "agent") -> list[str]:
         cmd = ["copilot", "-p", prompt, "--silent"]
-        if writable:
+        if writable and unrestricted_agent_allowed(self.root):
             cmd.append("--allow-all")
         return cmd
