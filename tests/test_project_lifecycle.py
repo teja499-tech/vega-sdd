@@ -39,6 +39,7 @@ def test_release_only_check_not_task_certification(repo):
     cfg['components'][0]['checks']['integration']={'argv':[sys.executable,'-c','raise SystemExit(1)'],'run_at':'release'}
     configure(repo,cfg)
     assert run_checks(repo,phase='task')['passed'] and not quality_current(repo)
+    assert run_checks(repo,phase='feature')['passed']
     assert not run_checks(repo)['passed']
 
 def test_protected_branch_and_nonoverwrite_ci(repo,tmp_path):

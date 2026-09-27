@@ -22,16 +22,75 @@ def design_documents():
             docs['EXISTING_SYSTEM']['sections']['Observed current behavior'] += ' The currently inspected service.py sets MAX_TITLE to '+limit+'.'
     return docs
 
+FEATURES = [
+    (
+        'Storage',
+        [1],
+        'Persist incidents in a local SQLite file so records survive a process restart.',
+        ['Incident rows remain after reopen of the same database file.'],
+        ['Remote databases and multi-host replication are out of scope.'],
+        ['Create then reopen store', 'Missing database file starts empty'],
+        '',
+        'Add store.py and storage tests that create an incident, reopen the SQLite file, and still list that row.',
+    ),
+    (
+        'API',
+        [2, 3, 4, 5],
+        'Expose authenticated HTTP create, list, resolve, and health for the incident store.',
+        ['Every mutating request requires the runtime API key.', 'Titles longer than the approved maximum are rejected.'],
+        ['Browser UI and multi-tenant isolation are out of scope.'],
+        ['Create with key', 'Reject missing key', 'Reject overlong title', 'Resolve existing id', 'Health without auth'],
+        'POST /incidents {title} -> 201; GET /incidents -> 200 list; POST /incidents/{id}/resolve -> 200; GET /health -> 200. Errors: 400 validation, 401 missing key.',
+        'Add service.py and API tests that prove create, pagination, resolve, health, and authentication failures against the real local HTTP server.',
+    ),
+    (
+        'Operations',
+        [6],
+        'Document local run, restart, and error handling so operators can verify the service.',
+        ['Restart keeps stored incidents.', 'Unhandled errors do not leak secrets.'],
+        ['Cloud hosting, on-call ownership, and staged cutover are out of scope.'],
+        ['Restart retains data', 'Safe error body'],
+        '',
+        'Add OPERATIONS.md and ops tests that restart the process and assert stored incidents and safe error responses remain.',
+    ),
+]
+
+
 def bundle():
     reqs=[]
     titles=['SQLite persistence','Create incidents','Authenticated pagination','Resolve incidents','Health and safe errors','Operations and tests']
     for i,title in enumerate(titles,1):
-        reqs.append(dict(id=f'REQ-{i:03}',title=title,statement=title+' as specified in PRD.md',acceptance_criteria=[f'AC-{i:03}: executable acceptance test proves {title}']))
+        reqs.append(dict(id=f'REQ-{i:03}',title=title,statement=title+' as specified in PRD.md for the single-host Incident Desk API.',acceptance_criteria=[f'AC-{i:03}: executable acceptance test proves {title}']))
     features=[]
-    for i,(name,ids) in enumerate([('Storage',[1]),('API',[2,3,4,5]),('Operations',[6])],1):
+    for i, (name, ids, summary, invariants, non_goals, test_matrix, api_contract, description) in enumerate(FEATURES, 1):
         fid=f'F{i:03}';rids=[f'REQ-{r:03}' for r in ids]
-        features.append(dict(id=fid,name=name,summary=name,requirements=rids,depends_on=[f'F{i-1:03}'] if i>1 else [],tasks=[dict(id=f'TASK-{fid}-001',feature_id=fid,title=name,description=f'Implement {name}',implements=rids,verification=['python3 -m unittest discover -s acceptance -v'])]))
-    return dict(product=dict(name='Incident Desk',summary='Single-tenant internal incident API',users=['Operators'],capabilities=titles),requirements=reqs,features=features,design_documents=design_documents(),architecture_summary='Python WSGI, SQLite, runtime API key, single host behind TLS proxy',test_strategy=['Storage tests','Real HTTP requests','Process restart'],security_principles=['Runtime secrets','Parameterized SQL'],release_criteria=['All acceptance tests pass','External production deployment review remains required'])
+        features.append(dict(
+            id=fid,
+            name=name,
+            summary=summary,
+            requirements=rids,
+            depends_on=[f'F{i-1:03}'] if i>1 else [],
+            invariants=invariants,
+            non_goals=non_goals,
+            test_matrix=test_matrix,
+            api_contract=api_contract,
+            tasks=[dict(id=f'TASK-{fid}-001',feature_id=fid,title=name,description=description,implements=rids,verification=['python3 -m unittest discover -s acceptance -v'])],
+        ))
+    return dict(
+        product=dict(
+            name='Incident Desk',
+            summary='Single-tenant internal incident API for operators to create, list, resolve, and health-check records.',
+            users=['Operators'],
+            capabilities=titles,
+        ),
+        requirements=reqs,
+        features=features,
+        design_documents=design_documents(),
+        architecture_summary='Python WSGI, SQLite, runtime API key, single host behind TLS proxy',
+        test_strategy=['Storage tests','Real HTTP requests','Process restart'],
+        security_principles=['Runtime secrets','Parameterized SQL'],
+        release_criteria=['All acceptance tests pass','External production deployment review remains required'],
+    )
 if 'PRODUCT_DISCOVERY_JSON' in prompt:
     output=bundle()['product']; output['open_questions']=['Confirm the initial title maximum (characters)?']
 elif 'ARCHITECTURE_DECISIONS_JSON' in prompt:

@@ -207,7 +207,7 @@ def run_checks(root, phase='all'):
     before=fingerprint(root); results=[]
     for c in ordered(cfg.components):
         for name,cmd in c.checks.items():
-            if phase=='task' and cmd.run_at=='release':continue
+            if phase in {'task', 'feature'} and cmd.run_at=='release':continue
             result=execute(cmd,inside(root,c.path));results.append({'component':c.id,'check':name,**result})
             if result['returncode']:break
         if results and results[-1]['returncode']:break

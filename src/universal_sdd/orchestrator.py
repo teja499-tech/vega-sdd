@@ -558,9 +558,9 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     for feature in bundle.features:
         for task in feature.tasks:
             old = old_tasks.get(task.id)
+            runtime = {"status", "attempts", "evidence", "working_set", "last_findings", "check_paths", "check_command"}
             if feature.id in cr.affected_features or changed_reqs.intersection(task.implements) or (
-                old and old.model_dump(exclude={"status", "attempts", "evidence"}) !=
-                task.model_dump(exclude={"status", "attempts", "evidence"})):
+                old and old.model_dump(exclude=runtime) != task.model_dump(exclude=runtime)):
                 invalidated.add(task.id)
     # Conservative transitive invalidation across task and feature dependencies.
     while True:
