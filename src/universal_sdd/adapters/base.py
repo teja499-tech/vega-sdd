@@ -56,6 +56,17 @@ class AgentAdapter(ABC):
             )
         except FileNotFoundError:
             return AgentResult(success=False, text=f"Agent command not found: {cmd[0]}", exit_code=127)
+        except OSError as exc:
+            # macOS ARG_MAX / exec failures surface here (large PRD-as-argv).
+            # Return a structured failure instead of crashing the controller.
+            redacted = ["<prompt>" if c == prompt else c for c in cmd]
+            return AgentResult(
+                success=False,
+                text=f"Failed to launch agent '{cmd[0]}': {exc}. "
+                "If the PRD/prompt is very large, the prompt-as-argv transport may have hit OS argument limits.",
+                exit_code=127,
+                raw={"stdout": [], "stderr": [str(exc)], "command": redacted},
+            )
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -97,7 +108,11 @@ class AgentAdapter(ABC):
             text=("Agent timed out. " + text) if timed_out else text,
             events=[e for line in stdout_lines if (e := self.parse_event(line))],
             exit_code=code,
-            raw={"stdout": stdout_lines, "stderr": stderr_lines, "command": cmd[:-1] + ["<prompt>"]},
+            raw={
+                "stdout": stdout_lines,
+                "stderr": stderr_lines,
+                "command": ["<prompt>" if c == prompt else c for c in cmd],
+            },
         )
 
     def parse_event(self, line: str) -> AgentEvent | None:

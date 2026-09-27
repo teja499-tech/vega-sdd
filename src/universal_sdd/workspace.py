@@ -203,7 +203,7 @@ def fingerprint(root):
 def run_checks(root, phase='all'):
     root=Path(root); cfg=load_workspace(root)
     if gaps(cfg):raise RuntimeError('; '.join(gaps(cfg)))
-    if phase not in {'all','task'}:raise ValueError('Invalid phase')
+    if phase not in {'all','task','feature','release'}:raise ValueError('Invalid phase')
     before=fingerprint(root); results=[]
     for c in ordered(cfg.components):
         for name,cmd in c.checks.items():

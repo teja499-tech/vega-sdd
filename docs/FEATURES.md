@@ -70,9 +70,11 @@ Features contain requirements, dependencies, bounded tasks, and verification cri
 
 ## 7. Project-owned Agent Skills
 
-`/.agents/skills/` is canonical and contains reusable workflows such as architecture design, feature specification, task implementation, verification, security review, drift detection, and reconciliation.
+`/.agents/skills/` is canonical. Core runbooks cover implementation, review, feature specs, architecture, API, UX, data model, threat model, docs, and security review. Each file has a routing description, a directory map, a procedure, a checklist, and failure modes.
 
-**Best use:** add project/domain-specific skills here (for example `database-migration`, `fastapi-api`, `terraform-module`, or `hipaa-data-handling`) rather than bloating `AGENTS.md`.
+The controller injects the skill name and description. The agent loads the matching `SKILL.md` on demand.
+
+**Best use:** add project/domain-specific skills here (for example `database-migration`, `fastapi-api`, `terraform-module`, or `hipaa-data-handling`) rather than bloating `AGENTS.md`. Run `sdd scaffold` to install missing framework skills.
 
 ## 8. Project-owned specialist roles
 
@@ -88,6 +90,8 @@ The configured agent lives in `.sdd/config.yaml` and can be changed with:
 sdd agent use cursor
 sdd agent use codex
 sdd agent use claude
+sdd agent use gemini
+sdd agent use copilot
 ```
 
 Specs and state do not move.
@@ -98,7 +102,7 @@ Specs and state do not move.
 
 **Command:** `sdd doctor`
 
-Detects supported CLIs and reports key adapter capabilities such as structured output, streaming, resume, and interruption support.
+Detects supported CLIs and reports key adapter capabilities such as structured output, streaming, resume, and interruption support. It also reports whether the `graphify` CLI and the Headroom Python package are installed.
 
 **Best use:** run before first initialization and whenever an agent CLI is upgraded substantially.
 
@@ -243,3 +247,23 @@ A later release can add detached execution without changing project-state semant
 V1 does not allow multiple concurrent implementation agents to edit the repo. That is intentional: it avoids merge/worktree/dependency races while still allowing independent review passes through the selected agent.
 
 The task DAG is designed so parallel workers can be added later behind explicit worktree/merge coordination.
+
+## 27. Graphify retrieval
+
+**Commands:** `sdd graph refresh`, `sdd graph query`
+
+Graphify is an external local knowledge graph. `sdd graph refresh` writes `graphify-corpus/sdd-traceability.md`, then runs `graphify extract --code-only --no-cluster` or `graphify update` when `graphify-out/graph.json` already exists. Context packs and `sdd ask` query that graph before agents grep the tree.
+
+`.sdd/state/` stays the execution record. If `graphify` is missing, the controller uses the task working-set file list.
+
+## 28. Headroom compression
+
+Headroom compresses context-pack excerpts, spec slices, and check logs before they enter implement, review, repair, and ask prompts. Originals remain under `.sdd/runtime/originals/`. `sdd status` shows raw versus compressed size. Compression never fails a task, and there is no token cap that pauses a run.
+
+## 29. Project copilot and classified changes
+
+**Commands:** `sdd ask`, `sdd change`, `sdd clarify`, `sdd task retry`
+
+`sdd ask` answers from specs, ADRs, and Graphify without mutating the plan. `sdd change` classifies a request. Implementation defects can become repair tasks. Requirement and architecture changes print the invalidated tasks and wait for approval (`--approve` or the confirmation prompt). `sdd clarify` records answers that unblock `sdd start`. `sdd task retry --keep-code` puts a failed task back on the scheduler without discarding the working tree.
+
+Review fails a task only for critical, high, or medium findings that violate acceptance criteria. Low and warning findings are recorded and do not block. Task checks prefer the task's own paths; the full suite runs at feature end.

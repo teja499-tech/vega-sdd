@@ -4,7 +4,7 @@
 
 Vega SDD is an open source, repository-owned framework for planning, implementing, reviewing, and releasing software with AI coding agents. It connects product intent, human-readable design, tasks, checks, changes, and release evidence so a project can continue across sessions and agent tools.
 
-> **Status:** 0.3.1 alpha. The controller and mock adapter have local test coverage. Real coding-agent CLIs, GitHub hosting controls, deployed environments, and non-Linux platforms still require validation in your own setup. [See verification notes](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md).
+> **Status:** 0.4.0 alpha. The controller and mock adapter have local test coverage. A bounded Taskline AI run exercised Graphify retrieval, Headroom compression, `sdd ask`, and `sdd change`. Real coding-agent CLIs, GitHub hosting controls, deployed environments, and non-Linux platforms still require validation in your own setup. [See verification notes](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md).
 
 ## Start here
 
@@ -55,12 +55,22 @@ sdd watch                  # follow durable project state
 sdd start                  # work through ready tasks
 sdd pause                  # stop at a task boundary
 sdd resume                 # continue from repository state
-sdd intervene              # discuss a concern with the architecture role
-sdd change "Describe it"  # classify and route a defect or approved change
-sdd agent use codex        # select the primary coding agent
+sdd ask "Question"         # read-only answer from specs, ADRs, and Graphify
+sdd change "Describe it"  # classify a change; approve before intent is rewritten
+sdd graph refresh          # rebuild the local Graphify knowledge graph
+sdd scaffold               # add missing skills and upgrade old framework checklists
+sdd agent use cursor       # cursor, codex, claude, gemini, or copilot
 ```
 
-Run `sdd --help` for the full command list. The project state lives under `.sdd/`, with reusable roles and skills under `.agents/`. Vendor-specific files are thin adapters. One primary coding agent writes at a time; separate reviewer roles and deterministic checks inspect the work.
+Run `sdd --help` for the full command list. The project state lives under `.sdd/`. Graphify writes `graphify-out/` and does not replace that state. Reusable roles and skills live under `.agents/`. Prompts carry a skill name and description; the agent loads `.agents/skills/<name>/SKILL.md` when the task matches. Vendor-specific files are thin adapters. One primary coding agent writes at a time; separate reviewer roles and deterministic checks inspect the work.
+
+Optional local tools, installed separately:
+
+```bash
+python -m pip install graphifyy headroom-ai
+```
+
+`graphifyy` provides the `graphify` CLI. `sdd doctor` reports whether Graphify and Headroom are available. A run continues when either is missing: retrieval falls back to the working-set file list, and prompts keep the compact text already on disk. Vega SDD does not stop a task because an estimated token count crossed a cap. `sdd status` records raw versus compressed size when Headroom shrinks a pack or check log.
 
 ## Documentation
 
@@ -71,7 +81,7 @@ Run `sdd --help` for the full command list. The project state lives under `.sdd/
 | [Design and history](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) | Human-readable design and commit-linked changelog |
 | [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, agents and durable state |
 | [Specification model](https://github.com/teja499-tech/vega-sdd/blob/main/docs/SPEC_MODEL.md) | Requirement, feature and task identity |
-| [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude Code and mock boundaries |
+| [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, and mock boundaries |
 | [Verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md) | Local results and remaining qualification |
 | [Research and gaps](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RESEARCH_AND_GAPS.md) | Cross-project design rationale |
 

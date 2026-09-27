@@ -16,7 +16,18 @@ class AgentName(str, Enum):
     cursor = "cursor"
     codex = "codex"
     claude = "claude"
+    gemini = "gemini"
+    copilot = "copilot"
     mock = "mock"
+
+
+PRIMARY_AGENTS = (
+    AgentName.cursor,
+    AgentName.codex,
+    AgentName.claude,
+    AgentName.gemini,
+    AgentName.copilot,
+)
 
 
 class ProjectKind(str, Enum):
@@ -66,6 +77,7 @@ class SDDConfig(BaseModel):
     test_command: str | None = None
     lint_command: str | None = None
     typecheck_command: str | None = None
+    require_resolved_clarifications: bool = True
 
 
 class ArchitectureOption(BaseModel):
@@ -118,6 +130,10 @@ class Task(BaseModel):
     implements: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
+    check_paths: list[str] = Field(default_factory=list)
+    check_command: str | None = None
+    working_set: list[str] = Field(default_factory=list)
+    last_findings: list[dict[str, Any]] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.pending
     attempts: int = 0
     evidence: list[str] = Field(default_factory=list)
@@ -138,6 +154,12 @@ class Feature(BaseModel):
     requirements: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     tasks: list[Task] = Field(default_factory=list)
+    invariants: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    test_matrix: list[str] = Field(default_factory=list)
+    api_contract: str = ""
+    ux_contract: str = ""
+    target_files: list[str] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.pending
 
 
@@ -189,6 +211,8 @@ class ProjectState(BaseModel):
     last_checkpoint: str | None = None
     pause_requested: bool = False
     stop_requested: bool = False
+    tokens_used: int = 0
+    tokens_this_run: int = 0
     updated_at: str = Field(default_factory=utcnow)
 
 
@@ -248,6 +272,8 @@ class AgentResult(BaseModel):
     session_id: str | None = None
     raw: Any = None
     exit_code: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class RepoContext(BaseModel):

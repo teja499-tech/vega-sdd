@@ -40,6 +40,8 @@ def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -
 
 
 def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+    from .spec_quality import assert_spec_quality
+    assert_spec_quality(bundle)
     product = bundle.product
     (paths.product / "vision.md").write_text(
         f"# {product.name}\n\n{product.summary}\n\n## Users\n{_md_list(product.users)}\n\n## Capabilities\n{_md_list(product.capabilities)}\n",
@@ -94,16 +96,26 @@ def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verificat
                 "",
             ]
         (feature_dir / "spec.md").write_text(
-            f"# {feature.id} — {feature.name}\n\n{feature.summary}\n\n## Requirements\n{_md_list(feature.requirements)}\n\n## Dependencies\n{_md_list(feature.depends_on)}\n",
+            f"# {feature.id} — {feature.name}\n\n{feature.summary}\n\n"
+            f"## Invariants\n{_md_list(feature.invariants)}\n\n"
+            f"## Non-goals\n{_md_list(feature.non_goals)}\n\n"
+            f"## Requirements\n{_md_list(feature.requirements)}\n\n"
+            f"## API contract\n\n{feature.api_contract or 'Not applicable'}\n\n"
+            f"## UX contract\n\n{feature.ux_contract or 'Not applicable'}\n\n"
+            f"## Test matrix\n{_md_list(feature.test_matrix)}\n\n"
+            f"## Target files\n{_md_list(feature.target_files)}\n\n"
+            f"## Dependencies\n{_md_list(feature.depends_on)}\n",
             encoding="utf-8",
         )
         (feature_dir / "tasks.md").write_text("\n".join(task_lines), encoding="utf-8")
         dump_yaml(feature_dir / "state.yaml", feature)
     (paths.sdd / "roadmap.md").write_text("\n".join(roadmap) + "\n", encoding="utf-8")
 
+    from .project_graph import refresh_graph
     dump_yaml(paths.requirements_file, bundle.requirements)
     dump_yaml(paths.features_file, bundle.features)
     dump_yaml(paths.spec_bundle_file, bundle)
+    refresh_graph(paths)
     if not preserve_verification or not paths.verification_file.exists():
         dump_yaml(paths.verification_file, [])
     state = ProjectState(run_status=RunStatus.ready, initialized=True, artifacts_generated=True)

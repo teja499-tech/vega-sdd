@@ -16,20 +16,21 @@ from rich.table import Table
 from . import __version__
 from .adapters import get_adapter
 from .artifacts import project_context, write_architecture, write_spec_bundle
-from .json_utils import extract_json
+from .json_utils import extract_json, parse_structured
 from .journal import Journal
 from .models import (
     AgentName,
     ArchitectureDecision,
     ChangeRequest,
     DecisionStatus,
+    PRIMARY_AGENTS,
     ProductModel,
     ProjectKind,
     RunStatus,
     SDDConfig,
     SpecBundle,
 )
-from .orchestrator import analyze_change, apply_change, request_pause, run_development
+from .orchestrator import analyze_change, apply_change, ask_project, request_pause, retry_task, run_development
 from .prompts import (
     architecture_prompt,
     ask_architect_prompt,
@@ -37,7 +38,7 @@ from .prompts import (
     spec_bundle_prompt,
 )
 from .repository import summarize_repository
-from .scaffold import write_scaffold
+from .scaffold import refresh_scaffold, write_scaffold
 from .status import metrics, publish_status, render_status
 from .storage import (
     SDDPaths,
@@ -72,6 +73,41 @@ def _event_printer(event) -> None:
         if len(msg) > 220:
             msg = msg[:217] + "..."
         console.print(f"[dim]{event.type}[/dim] {msg}")
+
+
+_JSON_RETRY_PREFIX = (
+    "CRITICAL CONTROLLER RETRY: Your previous reply was not valid JSON. "
+    "Do not explain. Do not use markdown fences. The first character of the "
+    "response must be '{' or '['. Return ONLY the required JSON value.\n\n"
+)
+
+
+def _persist_agent_text(paths: SDDPaths, name: str, text: str) -> None:
+    paths.runtime.mkdir(parents=True, exist_ok=True)
+    (paths.runtime / f"{name}.txt").write_text(text or "", encoding="utf-8")
+
+
+def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
+    """Run a read-only plan call and parse structured JSON, retrying once."""
+    # Cursor --mode plan is for analysis/proposals and often returns prose.
+    # Structured init payloads use ask (read-only) so the model can emit JSON.
+    result = adapter.run(prompt, writable=False, mode="ask", on_event=_event_printer)
+    if not result.success:
+        _persist_agent_text(paths, label.replace(" ", "-"), result.text)
+        _fail(result.text or f"{label} agent failed")
+    try:
+        return parse_structured(result.text, validate)
+    except Exception:
+        _persist_agent_text(paths, label.replace(" ", "-"), result.text)
+        console.print(f"[yellow]{label} did not return valid JSON; retrying once.[/yellow]")
+        retry = adapter.run(_JSON_RETRY_PREFIX + prompt, writable=False, mode="ask", on_event=_event_printer)
+        _persist_agent_text(paths, label.replace(" ", "-") + "-retry", retry.text)
+        if not retry.success:
+            _fail(retry.text or f"{label} retry failed")
+        try:
+            return parse_structured(retry.text, validate)
+        except Exception as exc:
+            _fail(f"Could not parse {label} output: {exc}")
 
 
 def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision], yes: bool) -> list[ArchitectureDecision]:
@@ -161,9 +197,9 @@ def init(
     console.print(Panel.fit("Vega SDD · Project Initialization", subtitle=f"v{__version__}"))
     if agent is None:
         if yes:
-            agent = AgentName.codex
+            agent = AgentName.cursor
         else:
-            raw = typer.prompt("Initial coding agent (cursor/codex/claude)", default="codex")
+            raw = typer.prompt("Initial coding agent (cursor/codex/claude/gemini/copilot)", default="cursor")
             try:
                 agent = AgentName(raw.lower())
             except ValueError:
@@ -196,51 +232,62 @@ def init(
 
     repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
     console.print("\n[bold]1/4 Product discovery[/bold]")
-    discovery_result = adapter.run(product_discovery_prompt(prd_text, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not discovery_result.success:
-        _fail(discovery_result.text or "Product discovery agent failed")
-    try:
-        product = ProductModel.model_validate(extract_json(discovery_result.text))
-    except Exception as exc:
-        _fail(f"Could not parse product discovery output: {exc}")
+    product = _require_model(
+        adapter,
+        product_discovery_prompt(prd_text, repo_summary),
+        ProductModel.model_validate,
+        "product discovery",
+        paths,
+    )
 
-    clarifications: list[str] = []
+    from .clarifications import record_architecture_decisions, record_product_questions
+    answers: list[tuple[str, str]] = []
     if product.open_questions:
         console.print(f"Found {len(product.open_questions)} material clarification question(s).")
-        for i, question in enumerate(product.open_questions, 1):
+        for question in product.open_questions:
             if yes:
-                clarifications.append(f"Q{i}: {question}\nA{i}: Deferred")
+                answers.append((question, "Deferred"))
             else:
-                answer = typer.prompt(question, default="defer")
-                clarifications.append(f"Q{i}: {question}\nA{i}: {answer}")
-        (paths.product / "clarifications.md").write_text("# PRD Clarifications\n\n" + "\n\n".join(clarifications) + "\n", encoding="utf-8")
+                answers.append((question, typer.prompt(question, default="defer")))
+        record_product_questions(paths, product, answers)
+    clarifications = [f"{qid}: {q}\nA: {a}" for qid, (q, a) in ((f"Q{i}", pair) for i, pair in enumerate(answers, 1))]
     augmented_prd = prd_text + ("\n\n# SDD Clarifications\n" + "\n\n".join(clarifications) if clarifications else "")
 
     console.print("\n[bold]2/4 Architecture workshop[/bold]")
-    arch_result = adapter.run(architecture_prompt(augmented_prd, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not arch_result.success:
-        _fail(arch_result.text or "Architecture analysis failed")
-    try:
-        raw_decisions = extract_json(arch_result.text)
-        decisions = [ArchitectureDecision.model_validate(x) for x in raw_decisions]
-    except Exception as exc:
-        _fail(f"Could not parse architecture output: {exc}")
+    def _validate_decisions(raw):
+        if not isinstance(raw, list):
+            raise ValueError("Architecture output must be a JSON array")
+        return [ArchitectureDecision.model_validate(x) for x in raw]
+    decisions = _require_model(
+        adapter,
+        architecture_prompt(augmented_prd, repo_summary),
+        _validate_decisions,
+        "architecture",
+        paths,
+    )
     decisions = _select_architecture(adapter, augmented_prd, decisions, yes)
     write_architecture(paths, decisions)
+    record_architecture_decisions(paths, decisions)
 
     deferred = [d for d in decisions if d.status == DecisionStatus.deferred]
     if deferred:
         console.print(f"[yellow]{len(deferred)} architecture decision(s) remain deferred. Specs will record them as unresolved.[/yellow]")
 
     console.print("\n[bold]3/4 Specification generation[/bold]")
-    spec_result = adapter.run(spec_bundle_prompt(augmented_prd, decisions, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not spec_result.success:
-        _fail(spec_result.text or "Specification generation failed")
+    bundle = _require_model(
+        adapter,
+        spec_bundle_prompt(augmented_prd, decisions, repo_summary),
+        SpecBundle.model_validate,
+        "specification bundle",
+        paths,
+    )
     try:
-        bundle = SpecBundle.model_validate(extract_json(spec_result.text))
-    except Exception as exc:
-        _fail(f"Could not parse specification bundle: {exc}")
-    write_spec_bundle(paths, bundle)
+        write_spec_bundle(paths, bundle)
+    except ValueError as exc:
+        state = load_project_state(paths)
+        state.run_status = RunStatus.blocked
+        save_project_state(paths, state)
+        _fail(str(exc), 2)
 
     report = validate_traceability(paths)
     if not report.ok:
@@ -269,6 +316,23 @@ def init(
     console.print("Next: [bold]sdd start[/bold]  |  inspect: [bold]sdd status[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold]")
 
 
+@app.command("scaffold")
+def scaffold_cmd(
+    root: Path = typer.Option(Path("."), "--root"),
+    force: bool = typer.Option(False, "--force", help="Overwrite customized skills and roles, not only stubs."),
+) -> None:
+    """Refresh roles, skills, and IDE commands in an existing project. Does not rewrite specs."""
+    report = refresh_scaffold(_root(root), refresh=True, force=force)
+    for action, rows in report.items():
+        if not rows:
+            continue
+        console.print(f"[bold]{action}[/bold] ({len(rows)})")
+        for rel in rows:
+            console.print(f"  {rel}")
+    if not any(report.values()):
+        console.print("Scaffold already current.")
+
+
 @app.command()
 def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
     """Inspect SDD and coding-agent readiness."""
@@ -278,7 +342,7 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
     table.add_column("Installed")
     table.add_column("Version")
     table.add_column("Capabilities")
-    for name in [AgentName.cursor, AgentName.codex, AgentName.claude]:
+    for name in PRIMARY_AGENTS:
         caps = get_adapter(name, root).capabilities()
         features = ", ".join(k for k, v in {
             "stream": caps.streaming, "resume": caps.resume, "interrupt": caps.interrupt, "structured": caps.structured_output
@@ -287,9 +351,27 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
     console.print(table)
     paths = SDDPaths(root)
     if paths.config_file.exists():
+        from .clarifications import unresolved_material
         cfg = load_config(paths)
+        state = load_project_state(paths)
         console.print(f"Configured primary agent: [bold]{cfg.primary_agent.value}[/bold]")
-        console.print(f"SDD state: {load_project_state(paths).run_status.value}")
+        console.print(f"SDD state: {state.run_status.value}")
+        if not cfg.test_command and cfg.primary_agent != AgentName.mock and not (root / ".sdd/workspace.yaml").exists():
+            console.print("[yellow]Missing test_command and workspace policy. Run `sdd project setup`.[/yellow]")
+        if not (root / ".sdd/workspace.yaml").exists() and cfg.primary_agent != AgentName.mock:
+            console.print("[yellow]No approved workspace policy. Real-agent runs require `sdd project setup`.[/yellow]")
+        open_qs = unresolved_material(paths)
+        if open_qs:
+            console.print(f"[yellow]{len(open_qs)} unresolved clarification(s). Run `sdd clarify` or start with --accept-deferred.[/yellow]")
+        if shutil.which("docker") is None:
+            console.print("[dim]docker not on PATH (optional; needed for compose-based projects).[/dim]")
+        console.print(f"Graphify: {'installed' if shutil.which('graphify') else 'missing — sdd graph refresh needs the Graphify CLI'}")
+        try:
+            import headroom  # noqa: F401
+            headroom_state = "installed"
+        except ImportError:
+            headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
+        console.print(f"Headroom: {headroom_state}")
     else:
         console.print("SDD not initialized in this directory.")
 
@@ -299,7 +381,7 @@ def agent_list(root: Path = typer.Option(Path("."), "--root")) -> None:
     root = _root(root)
     paths = SDDPaths(root)
     current = load_config(paths).primary_agent if paths.config_file.exists() else None
-    for name in [AgentName.cursor, AgentName.codex, AgentName.claude]:
+    for name in PRIMARY_AGENTS:
         caps = get_adapter(name, root).capabilities()
         marker = "*" if current == name else " "
         console.print(f"{marker} {name.value:8} {'installed' if caps.installed else 'missing':9} {caps.version or ''}")
@@ -341,6 +423,10 @@ def status(root: Path = typer.Option(Path("."), "--root")) -> None:
     table.add_row("Requirements verified", f"{m.requirements_verified}/{m.requirements_total}")
     table.add_row("Tasks verified", f"{m.tasks_verified}/{m.tasks_total}")
     table.add_row("Current", f"{state.current_feature or '-'} / {state.current_task or '-'}")
+    from .tokens import savings_summary
+    saved = savings_summary(paths)
+    if saved["events"]:
+        table.add_row("Context saved", f"{saved['saved_chars']} chars / {saved['events']} packs")
     console.print(table)
     console.print(f"Status file: {paths.status_file.relative_to(paths.root)}")
 
@@ -366,12 +452,13 @@ def watch(
 def start(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1, help="Pause after N verified tasks."),
+    accept_deferred: bool = typer.Option(False, "--accept-deferred", help="Sign deferred clarifications as accepted defaults."),
 ) -> None:
     """Run autonomous task implementation/review/repair in the foreground."""
     root = _root(root)
     console.print("Starting SDD development. Ctrl+C requests a safe pause.")
     try:
-        state = run_development(root, max_tasks=max_tasks, on_event=_event_printer)
+        state = run_development(root, max_tasks=max_tasks, on_event=_event_printer, accept_deferred=accept_deferred)
     except RuntimeError as exc:
         _fail(str(exc), 2)
     console.print(f"Run ended with state: [bold]{state.run_status.value}[/bold]")
@@ -384,10 +471,11 @@ def start(
 def resume(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1),
+    accept_deferred: bool = typer.Option(False, "--accept-deferred"),
 ) -> None:
     """Resume from durable repository state; no prior chat context is required."""
     root = _root(root)
-    start(root=root, max_tasks=max_tasks)
+    start(root=root, max_tasks=max_tasks, accept_deferred=accept_deferred)
 
 
 @app.command()
@@ -445,11 +533,13 @@ def _print_change(cr: ChangeRequest) -> None:
         f"Classification: [bold]{cr.classification}[/bold]\n"
         f"Affected requirements: {', '.join(cr.affected_requirements) or '-'}\n"
         f"Affected features: {', '.join(cr.affected_features) or '-'}\n"
-        f"Affected tasks: {', '.join(cr.affected_tasks) or '-'}\n"
+        f"Tasks that will be invalidated: {', '.join(cr.affected_tasks) or '-'}\n"
         f"Approval required: {'yes' if cr.requires_approval else 'no'}\n"
         f"Proposed: {'; '.join(cr.proposed_changes) or '-'}",
         title=cr.id,
     ))
+    if cr.affected_tasks:
+        console.print("[yellow]Resume will re-run only the invalidated tasks and their dependents.[/yellow]")
 
 
 @app.command()
@@ -460,12 +550,16 @@ def change(
 ) -> None:
     """Analyze a problem, classify it, and safely repair or reconcile affected specs."""
     root = _root(root)
-    cr = analyze_change(root, description)
+    try:
+        cr = analyze_change(root, description)
+    except (RuntimeError, ValueError) as exc:
+        _fail(str(exc), 2)
     _print_change(cr)
     if cr.requires_approval and not approve:
         approve = typer.confirm("This changes approved requirements/specs/architecture. Approve?", default=False)
     if cr.requires_approval and not approve:
         console.print(f"Change recorded as proposed: .sdd/changes/{cr.id}.yaml")
+        console.print("Re-run with --approve after reviewing the invalidated-task preview.")
         return
     cr.approved = True
     cr.status = "approved"
@@ -517,6 +611,99 @@ def feature(
         if p.exists():
             text += f"\n## {name}\n{p.read_text(encoding='utf-8')}\n"
     console.print(Panel(text, title=feature_id))
+
+
+graph_app = typer.Typer(help="Refresh and query the Graphify knowledge graph.")
+app.add_typer(graph_app, name="graph")
+
+
+@graph_app.command("refresh")
+def graph_refresh(root: Path = typer.Option(Path("."), "--root")) -> None:
+    """Write the traceability corpus and run graphify (or graphify update)."""
+    from .graphify_index import refresh_knowledge_graph
+    result = refresh_knowledge_graph(SDDPaths(_root(root)))
+    console.print(f"Corpus: {result.get('corpus')}")
+    if not result.get("installed"):
+        console.print("[yellow]graphify CLI is not installed. Corpus was written; the knowledge graph was not built.[/yellow]")
+        return
+    console.print(result.get("command") or "graphify")
+    if result.get("exit_code"):
+        console.print(result.get("output") or "graphify failed")
+        raise typer.Exit(2)
+    console.print(f"Graph: {result.get('graph') or 'graphify-out/graph.json'}")
+
+
+@graph_app.command("query")
+def graph_query(
+    question: str = typer.Argument(...),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Return a scoped Graphify subgraph for a question."""
+    from .graphify_index import query_knowledge_graph
+    text = query_knowledge_graph(_root(root), question)
+    if not text:
+        _fail("No Graphify subgraph. Install graphify and run `sdd graph refresh`.")
+    console.print(text)
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Project question grounded in specs, ADRs, and the project graph."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Read-only project copilot. Does not mutate the plan."""
+    try:
+        answer = ask_project(_root(root), question)
+    except RuntimeError as exc:
+        _fail(str(exc), 2)
+    console.print(Panel(answer or "No response", title="Project copilot"))
+
+
+@app.command()
+def clarify(
+    clarification_id: Optional[str] = typer.Argument(None, help="Clarification id such as Q1 or ARCH-001."),
+    answer: Optional[str] = typer.Option(None, "--answer", help="Answer to record."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Resolve material questions that block `sdd start`."""
+    from .clarifications import answer_clarification, load_clarifications, unresolved_material
+    paths = SDDPaths(_root(root))
+    if not clarification_id:
+        items = unresolved_material(paths) or load_clarifications(paths)
+        if not items:
+            console.print("No clarifications recorded.")
+            return
+        for item in items:
+            console.print(f"[bold]{item.id}[/bold] ({item.status}) {item.question}")
+            if item.answer:
+                console.print(f"  {item.answer}")
+        return
+    if not answer:
+        answer = typer.prompt("Answer")
+    try:
+        item = answer_clarification(paths, clarification_id, answer)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]{item.id} answered.[/green]")
+
+
+task_app = typer.Typer(help="Inspect or recover individual SDD tasks.")
+app.add_typer(task_app, name="task")
+
+
+@task_app.command("retry")
+def task_retry(
+    task_id: str,
+    keep_code: bool = typer.Option(True, "--keep-code/--wipe-status", help="Keep working-tree code and re-verify."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Re-queue a failed task without wiping uncommitted implementation."""
+    try:
+        task = retry_task(_root(root), task_id, keep_code=keep_code)
+    except RuntimeError as exc:
+        _fail(str(exc), 2)
+    mode = "implemented (keep code, re-verify)" if keep_code else "pending (re-implement)"
+    console.print(f"{task.id} queued as {mode}. Run `sdd resume`.")
 
 
 @app.command("log")

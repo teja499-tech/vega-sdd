@@ -12,7 +12,7 @@ def root(demo_repo):
     assert r.exit_code==0
     return demo_repo
 
-@pytest.mark.parametrize('args',[['status'],['doctor'],['roadmap'],['requirements'],['architecture'],['feature','F001'],['log'],['agent','list'],['agent','use','mock'],['verify']])
+@pytest.mark.parametrize('args',[['status'],['doctor'],['roadmap'],['requirements'],['architecture'],['feature','F001'],['log'],['agent','list'],['agent','use','mock'],['verify'],['clarify']])
 def test_read_commands(root,args):
     r=CliRunner().invoke(app,[*args,'--root',str(root)])
     assert r.exit_code==0,r.output

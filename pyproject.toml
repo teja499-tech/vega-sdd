@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vega-sdd"
-version = "0.3.1"
+version = "0.4.0"
 description = "Repository-owned project lifecycle framework for AI coding agents."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -43,6 +43,9 @@ Changelog = "https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+universal_sdd = ["skill_texts/*/SKILL.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

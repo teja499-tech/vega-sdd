@@ -67,20 +67,31 @@ For mature production work, avoid deferring choices that block data/security/dep
 Useful for demos/CI experiments:
 
 ```bash
-sdd init --agent codex --project-kind new --yes
+sdd init --agent cursor --project-kind new --yes
 ```
 
 `--yes` accepts the agent recommendation (or the first option when there is no recommendation). It is not recommended for consequential architecture on a real product unless constraints are already fully specified.
 
-## Configure deterministic checks
+## Configure deterministic checks and execution policy
 
-After init, edit `.sdd/config.yaml`:
+For the mock adapter, editing `.sdd/config.yaml` is enough:
 
 ```yaml
 test_command: "pytest -q"
 lint_command: "ruff check ."
 typecheck_command: "mypy src"
 max_repair_attempts: 3
+```
+
+For real agents (cursor/codex/claude), `sdd start` additionally requires an
+approved execution policy and an execution branch (see PROJECT_LIFECYCLE.md):
+
+```bash
+sdd project inspect
+sdd project setup
+# or: sdd project configure --file workspace-policy.yaml
+git add . && git commit -m "Approve project baseline"
+sdd repo branch <scope>
 ```
 
 Use the commands your application actually relies on. Vega SDD deliberately does not guess one universal test stack.
@@ -98,6 +109,11 @@ sdd verify
 For high-risk products, review these before `sdd start`. The framework automates preparation but does not remove human ownership of consequential product/architecture decisions.
 
 ## Start development
+
+Real-agent runs require the approved `.sdd/workspace.yaml` and execution
+branch above; otherwise `sdd start` fails with
+`Approve a project policy before real-agent execution: sdd project setup`
+or `Protected branch: create an execution branch`.
 
 ```bash
 sdd start
@@ -166,6 +182,53 @@ sdd agent use claude
 sdd resume
 ```
 
+## Ask a project question
+
+```bash
+sdd ask "Which module persists a new task?"
+```
+
+`sdd ask` is read-only. It grounds the answer in approved specs, ADRs, and a Graphify query when `graphify-out/graph.json` exists. It does not rewrite requirements or mark tasks complete.
+
+## Refresh the knowledge graph
+
+Install the Graphify CLI (`pip install graphifyy`), then:
+
+```bash
+sdd graph refresh
+sdd graph query "task creation persistence"
+```
+
+The first refresh runs `graphify extract <project> --code-only --no-cluster` (local AST, no model API). Later refreshes run `graphify update`. SDD also writes `graphify-corpus/sdd-traceability.md` so requirement and task identity stays next to the code graph. Canonical execution state remains `.sdd/state/`.
+
+Headroom (`pip install headroom-ai`) compresses context packs and check logs before they enter implement, review, repair, and ask prompts. The uncompressed text stays under `.sdd/runtime/originals/`. `sdd doctor` reports both tools. Missing either one does not block a run, and a run never stops because a token estimate crossed a cap.
+
+## Skills
+
+```bash
+sdd scaffold
+```
+
+Scaffold writes runbooks under `.agents/skills/`. A later `sdd scaffold` adds missing skills and replaces earlier framework checklists that still use the old frontmatter and lack a failure-mode section. A skill you rewrote without that frontmatter is left in place. `sdd scaffold --force` overwrites scaffold-managed files.
+
+Agent prompts include the skill name and its routing description. The agent reads `.agents/skills/<name>/SKILL.md` when the task matches. The controller does not paste the full runbook into every prompt.
+
+## Clarifications and retries
+
+Unresolved material questions block `sdd start` until they are answered:
+
+```bash
+sdd clarify
+sdd clarify Q1 --answer "Owners may export their own workspace only."
+sdd start --accept-deferred
+```
+
+A failed task stays out of the scheduler until you retry it. `--keep-code` requeues verification without discarding the working tree:
+
+```bash
+sdd task retry TASK-F001-003 --keep-code
+```
+
 ## Intervene when something feels wrong
 
 ```bash
@@ -209,6 +272,8 @@ sdd resume
 
 ```bash
 sdd agent use cursor
+sdd agent use gemini
+sdd agent use copilot
 ```
 
 The adapter change does not rewrite PRD, requirements, architecture, or state.
