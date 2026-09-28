@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -63,6 +64,13 @@ PRIORITY_DIRS = {
 
 EVIDENCE_CHARS = 360
 MAX_EVIDENCE = 10
+_VIEW_MAX_FILES = 10_000
+_VIEW_MAX_BYTES = 128 * 1024 * 1024
+_VIEW_MAX_FILE_BYTES = 4 * 1024 * 1024
+_INSTRUCTION_ROOTS = {".agents", ".codex", ".claude", ".cursor", ".git", ".sdd"}
+_INSTRUCTION_FILES = {
+    "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md",
+}
 
 
 def _priority(rel: str) -> tuple[int, str]:
@@ -75,6 +83,47 @@ def _priority(rel: str) -> tuple[int, str]:
     if path.suffix.lower() in {".toml", ".yml", ".yaml", ".json", ".tf", ".sql"}:
         return (2, rel)
     return (3, rel)
+
+
+def materialize_repository_view(source: Path, target: Path) -> str:
+    """Copy a bounded source view without pre-approval agent instructions or secrets."""
+    completed = subprocess.run(
+        ["git", "ls-files", "-co", "--exclude-standard", "-z"],
+        cwd=source, capture_output=True,
+    )
+    if completed.returncode:
+        names = [p.relative_to(source).as_posix() for p in source.rglob("*") if p.is_file()]
+    else:
+        names = [name for name in completed.stdout.decode().split("\0") if name]
+    copied = omitted = total = 0
+    for rel in sorted(set(names), key=_priority):
+        path = Path(rel)
+        lower_name = path.name.lower()
+        if (
+            not path.parts
+            or path.parts[0] in _INSTRUCTION_ROOTS
+            or rel in _INSTRUCTION_FILES
+            or path.name in {"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
+            or rel.startswith(".github/instructions/")
+            or lower_name == ".env" or lower_name.startswith(".env.")
+            or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
+        ):
+            omitted += 1
+            continue
+        src = source / path
+        if not src.is_file() or src.is_symlink():
+            omitted += 1
+            continue
+        size = src.stat().st_size
+        if size > _VIEW_MAX_FILE_BYTES or copied >= _VIEW_MAX_FILES or total + size > _VIEW_MAX_BYTES:
+            omitted += 1
+            continue
+        dest = target / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        copied += 1
+        total += size
+    return f"Isolated source view: {copied} files / {total} bytes copied; {omitted} instruction, secret, symlink, or over-budget files omitted."
 
 
 def _excerpt(root: Path, rel: str) -> str | None:

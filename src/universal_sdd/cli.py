@@ -40,7 +40,7 @@ from .prompts import (
     product_discovery_prompt,
     spec_bundle_prompt,
 )
-from .repository import summarize_repository
+from .repository import materialize_repository_view, summarize_repository
 from .scaffold import refresh_scaffold, write_scaffold
 from .status import metrics, publish_status, render_status
 from .storage import (
@@ -257,6 +257,9 @@ def init(
         # their capability hash during `sdd project setup`.
         write_scaffold(invocation_root, force=True)
         (invocation_root / "PRD.md").write_text(prd_text, encoding="utf-8")
+        source_view_note = ""
+        if project_kind == ProjectKind.existing:
+            source_view_note = materialize_repository_view(root, invocation_root)
         adapter = get_adapter(agent, invocation_root)
         caps = adapter.capabilities()
         if not caps.installed:
@@ -264,6 +267,8 @@ def init(
         console.print(f"Agent: [bold]{agent.value}[/bold] ({caps.version or 'version unknown'})")
 
         repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
+        if source_view_note:
+            repo_summary = source_view_note + "\n" + repo_summary
         console.print("\n[bold]1/4 Product discovery[/bold]")
         product = _require_model(
             adapter,
@@ -570,15 +575,23 @@ def verify(root: Path = typer.Option(Path("."), "--root")) -> None:
         raise typer.Exit(2)
 
 
-@app.command()
-def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
-    """Open an interactive architect conversation grounded in current repo state."""
-    root = _root(root)
+@single_writer
+def _intervention_answer(root: Path, question: str) -> str:
     paths = SDDPaths(root)
     config = load_config(paths)
     from .workspace import require_approved_capabilities
     require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
+    result = invoke_agent(adapter, ask_architect_prompt(question, project_context(paths)), root, writable=False, mode="plan")
+    if not result.success:
+        raise RuntimeError(result.text or "Architect intervention failed")
+    return result.text
+
+
+@app.command()
+def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
+    """Open an interactive architect conversation grounded in current repo state."""
+    root = _root(root)
     console.print("Architect intervention session. Type `exit` to leave, `change: ...` to analyze a correction/change.")
     while True:
         try:
@@ -594,8 +607,12 @@ def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
             if cr.requires_approval:
                 console.print("Run `sdd change \"...\"` to explicitly approve/apply it.")
             continue
-        result = invoke_agent(adapter, ask_architect_prompt(question, project_context(paths)), root, writable=False, mode="plan")
-        console.print(Panel(result.text or "No response", title="Architect"))
+        try:
+            answer = _intervention_answer(root, question)
+        except RuntimeError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            continue
+        console.print(Panel(answer or "No response", title="Architect"))
 
 
 def _print_change(cr: ChangeRequest) -> None:
@@ -633,7 +650,6 @@ def change(
         return
     cr.approved = True
     cr.status = "approved"
-    dump_yaml(SDDPaths(root).changes / f"{cr.id}.yaml", cr)
     try:
         applied = apply_change(root, cr)
     except RuntimeError as exc:

@@ -133,12 +133,24 @@ def capability_hash(root):
     """Bind approved execution to the agent instructions, roles, and skills it will load."""
     root=Path(root);h=hashlib.sha256()
     candidates=[]
-    agents=root/'AGENTS.md'
-    if agents.exists():candidates.append(agents)
-    for pattern in ('.agents/roles/*.md','.agents/skills/*/SKILL.md'):
+    for name in ('.mcp.json','.cursor/mcp.json','.cursorignore','.cursorindexingignore','.github/copilot-instructions.md'):
+        path=root/name
+        if path.exists():candidates.append(path)
+    for pattern in (
+        '.agents/**/*', '.codex/**/*', '.claude/**/*',
+        '.cursor/agents/**/*', '.cursor/rules/**/*',
+        '.github/instructions/**/*.instructions.md',
+        '**/AGENTS.md', '**/CLAUDE.md', '**/GEMINI.md',
+    ):
         candidates.extend(sorted(root.glob(pattern)))
-    for path in sorted(set(candidates),key=lambda p:p.relative_to(root).as_posix()):
+    unique=sorted(set(candidates),key=lambda p:p.relative_to(root).as_posix())
+    if len(unique)>1000:raise RuntimeError('Capability catalog exceeds 1000 files')
+    total=0
+    for path in unique:
+        if path.is_dir() or any(part in {'.git','node_modules','.venv','venv','dist','build'} for part in path.relative_to(root).parts):continue
         if path.is_symlink() or not path.is_file():raise RuntimeError('Capability files must be regular files: '+str(path.relative_to(root)))
+        size=path.stat().st_size;total+=size
+        if size>1_000_000 or total>32_000_000:raise RuntimeError('Capability files exceed approval size bounds')
         rel=path.relative_to(root).as_posix();h.update(rel.encode()+b'\0'+path.read_bytes()+b'\0')
     return h.hexdigest()
 def load_workspace(root):

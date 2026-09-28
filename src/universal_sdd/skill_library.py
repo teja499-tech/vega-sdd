@@ -184,6 +184,8 @@ class SkillInfo:
 
 
 _SAFE_CAPABILITY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_MAX_LOCAL_SKILLS = 128
+_MAX_SKILL_BYTES = 256_000
 
 
 def _metadata(text: str) -> dict:
@@ -228,10 +230,17 @@ def discover_skills(root: Path | None = None) -> dict[str, SkillInfo]:
     if root is not None:
         local = Path(root) / ".agents" / "skills"
         if local.exists():
-            for path in sorted(local.glob("*/SKILL.md")):
+            paths = sorted(local.glob("*/SKILL.md"))
+            if len(paths) > _MAX_LOCAL_SKILLS:
+                raise RuntimeError(f"Project skill catalog exceeds {_MAX_LOCAL_SKILLS} skills")
+            for path in paths:
                 name = path.parent.name
                 if not _SAFE_CAPABILITY.fullmatch(name):
                     continue
+                if path.is_symlink() or not path.is_file():
+                    raise RuntimeError(f"Skill must be a regular file: {name}")
+                if path.stat().st_size > _MAX_SKILL_BYTES:
+                    raise RuntimeError(f"Skill exceeds {_MAX_SKILL_BYTES} bytes: {name}")
                 text = path.read_text(encoding="utf-8")
                 info = _skill_info(name, text, path)
                 if info.name == name:

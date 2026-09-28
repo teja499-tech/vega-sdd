@@ -80,8 +80,10 @@ def _load_persisted_tx(paths: SDDPaths) -> dict[str, bytes] | None:
         raise ValueError("Projection transaction marker must not be a symlink")
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
+    except (OSError, ValueError) as exc:
+        raise ValueError("Projection transaction marker is corrupt") from exc
+    if not isinstance(data, dict):
+        raise ValueError("Projection transaction marker must be an object")
     if not data.get("active"):
         return None
     snapshot: dict[str, bytes] = {}
@@ -119,9 +121,10 @@ def recover_projection_transaction(paths: SDDPaths) -> bool:
         return False
     try:
         snapshot = _load_persisted_tx(paths)
-    except (OSError, ValueError, TypeError):
-        _clear_tx(paths)
-        return False
+    except (OSError, ValueError, TypeError) as exc:
+        # Preserve the only rollback evidence. An owner must inspect/remove the
+        # transaction rather than letting later writes compound partial state.
+        raise RuntimeError(f"Projection recovery blocked: {exc}") from exc
     if snapshot is None:
         return False
     _restore_canonical(paths, snapshot)

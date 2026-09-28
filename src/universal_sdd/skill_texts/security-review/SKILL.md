@@ -3,7 +3,7 @@ name: security-review
 description: Review one bounded change for auth, secrets, injection, and data exposure. Use when the task touches security. Return findings with severity. Do not redesign the threat model.
 routing:
   phases: [implement, repair, review]
-  any: [auth, authenticated, authorization, authentication, secret, security, injection, tenant, permission, credential, token]
+  any: [auth, authenticated, authorization, authentication, oauth, oidc, jwt, password, secret, security, injection, tenant, permission, credential, token, pii, personal data, encryption, kms, payment]
 ---
 
 # Security Review

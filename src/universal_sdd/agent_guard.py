@@ -7,6 +7,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+_MAX_SNAPSHOT_FILES = 20_000
+_MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
+_MAX_SNAPSHOT_FILE_BYTES = 64 * 1024 * 1024
+
 def _source_names(root: Path):
     listing = subprocess.run(
         ['git', 'ls-files', '-co', '--exclude-standard', '-z'],
@@ -75,7 +79,19 @@ def files(root,patterns):
     # write transcripts/caches elsewhere under `.cursor/` during writable runs.
     # Guarding the entire directory turns normal CLI activity into
     # "Agent modified protected controller files" run failures.
-    def protected(rel):return rel in {'AGENTS.md','CLAUDE.md','.sdd-controller.lock','.sdd','.agents','.codex','.claude','.cursor/agents','.cursor/rules'} or rel.startswith(('.sdd/','.agents/','.codex/','.claude/','.cursor/agents/','.cursor/rules/')) or any(fnmatch.fnmatch(rel,p) for p in patterns)
+    def protected(rel):
+        path = Path(rel)
+        instruction_name = path.name in {'AGENTS.md', 'CLAUDE.md', 'GEMINI.md'}
+        exact = rel in {
+            '.sdd-controller.lock', '.sdd', '.agents', '.codex', '.claude',
+            '.cursor/agents', '.cursor/rules', '.cursor/mcp.json', '.cursorignore',
+            '.cursorindexingignore', '.mcp.json', '.github/copilot-instructions.md',
+        }
+        prefix = rel.startswith((
+            '.sdd/', '.agents/', '.codex/', '.claude/', '.cursor/agents/',
+            '.cursor/rules/', '.github/instructions/',
+        ))
+        return instruction_name or exact or prefix or any(fnmatch.fnmatch(rel,p) for p in patterns)
     for folder,dirs,names in os.walk(root):
         dirs[:]=[d for d in dirs if d not in {'.git','node_modules','.venv','__pycache__','dist','build'}]
         for name in names+[d for d in dirs if (Path(folder)/d).is_symlink()]:
@@ -86,6 +102,7 @@ def files(root,patterns):
 def workspace_snapshot(root: Path) -> dict:
     """Walk the working tree. Git ls-files would hide gitignored and some untracked files."""
     result = {}
+    total = 0
     skip = {'.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build'}
     for folder, dirs, names in os.walk(root):
         dirs[:] = [d for d in dirs if d not in skip]
@@ -96,8 +113,33 @@ def workspace_snapshot(root: Path) -> dict:
                 continue
             if rel in {'.sdd-controller.lock', '.fixture-prompt.txt'}:
                 continue
+            size = path.lstat().st_size
+            if size > _MAX_SNAPSHOT_FILE_BYTES:
+                raise RuntimeError(f"Read-only guard refuses file larger than {_MAX_SNAPSHOT_FILE_BYTES} bytes: {rel}")
+            total += size
+            if len(result) >= _MAX_SNAPSHOT_FILES or total > _MAX_SNAPSHOT_BYTES:
+                raise RuntimeError("Read-only guard snapshot exceeds repository safety bounds")
             result[rel] = _read_source(root, rel)
     return result
+
+
+def snapshot_modes(root: Path, names) -> dict[str, int]:
+    result = {}
+    for name in names:
+        path = root / name
+        if path.exists() and not path.is_symlink():
+            result[name] = path.stat().st_mode & 0o7777
+    return result
+
+
+def restore_modes(root: Path, modes: dict[str, int]) -> list[str]:
+    changed = []
+    for name, mode in modes.items():
+        path = root / name
+        if path.exists() and not path.is_symlink() and path.stat().st_mode & 0o7777 != mode:
+            path.chmod(mode)
+            changed.append(name)
+    return changed
 
 
 def changed_since(root: Path, before: dict) -> list[str]:
@@ -159,9 +201,64 @@ def snapshot_git_index(root: Path) -> bytes | None:
     return path.read_bytes()
 
 
+def _git_dir(root: Path) -> Path | None:
+    completed = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=root, capture_output=True, text=True)
+    if completed.returncode:
+        return None
+    path = Path(completed.stdout.strip())
+    return path if path.is_absolute() else (root / path).resolve()
+
+
+def snapshot_git_refs(root: Path) -> dict[str, str]:
+    completed = subprocess.run(
+        ["git", "for-each-ref", "--format=%(refname) %(objectname)"],
+        cwd=root, capture_output=True, text=True,
+    )
+    if completed.returncode:
+        return {}
+    return dict(line.split(" ", 1) for line in completed.stdout.splitlines() if " " in line)
+
+
+def snapshot_git_metadata(root: Path) -> dict[str, tuple[bytes, int]]:
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return {}
+    result = {}
+    candidates = [git_dir / "config", git_dir / "info" / "exclude"]
+    hooks = git_dir / "hooks"
+    if hooks.exists():
+        candidates.extend(path for path in hooks.rglob("*") if path.is_file() or path.is_symlink())
+    for path in candidates:
+        if not path.exists() and not path.is_symlink():
+            continue
+        rel = path.relative_to(git_dir).as_posix()
+        result[rel] = (_read_source(git_dir, rel), path.lstat().st_mode & 0o7777)
+    return result
+
+
+def restore_git_metadata(root: Path, snapshot: dict[str, tuple[bytes, int]]) -> None:
+    git_dir = _git_dir(root)
+    if git_dir is None:
+        return
+    current = snapshot_git_metadata(root)
+    for rel in set(current) - set(snapshot):
+        path = git_dir / rel
+        path.unlink(missing_ok=True)
+    for rel, (content, mode) in snapshot.items():
+        path = git_dir / rel
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if content.startswith(b'\x00SYMLINK:'):
+            path.symlink_to(content[len(b'\x00SYMLINK:'):].decode())
+        else:
+            path.write_bytes(content)
+            path.chmod(mode)
+
+
 def restore_git_state(root: Path, original: tuple) -> None:
     """Restore HEAD and the captured index file. Does not rewrite the working tree."""
-    head, ref, index_bytes = original
+    head, ref, index_bytes, refs, metadata = original
     head_text = head.decode().strip() if isinstance(head, (bytes, bytearray)) else str(head).strip()
     ref_text = ref.decode().strip() if isinstance(ref, (bytes, bytearray)) else str(ref).strip()
     if ref_text:
@@ -172,18 +269,26 @@ def restore_git_state(root: Path, original: tuple) -> None:
             subprocess.run(["git", "update-ref", "-d", ref_text], cwd=root, capture_output=True)
     elif head_text:
         subprocess.run(["git", "update-ref", "--no-deref", "HEAD", head_text], cwd=root, capture_output=True)
+    current_refs = snapshot_git_refs(root)
+    for name in set(current_refs) - set(refs):
+        subprocess.run(["git", "update-ref", "-d", name], cwd=root, capture_output=True)
+    for name, value in refs.items():
+        subprocess.run(["git", "update-ref", name, value], cwd=root, capture_output=True)
     path = git_index_path(root)
     if path is None:
+        restore_git_metadata(root, metadata)
         return
     lock = path.with_name(path.name + ".lock")
     lock.unlink(missing_ok=True)
     if index_bytes is None:
         path.unlink(missing_ok=True)
+        restore_git_metadata(root, metadata)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + f".sdd-{os.getpid()}.tmp")
     temporary.write_bytes(index_bytes)
     os.replace(temporary, path)
+    restore_git_metadata(root, metadata)
 
 
 def restore_workspace(root: Path, snapshot: dict) -> list[str]:
@@ -220,18 +325,21 @@ def restore_workspace(root: Path, snapshot: dict) -> list[str]:
 
 def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
     before=files(root,patterns)
+    before_modes=snapshot_modes(root,before)
     if any(v.startswith(b'\x00SYMLINK:') for v in before.values()):raise RuntimeError('Protected controller symlink')
     def git_state():
         head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True).stdout
         ref = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=root, capture_output=True).stdout
-        return (head, ref, snapshot_git_index(root))
-    original=git_state();source=None
+        return (head, ref, snapshot_git_index(root), snapshot_git_refs(root), snapshot_git_metadata(root))
+    original=git_state();source=None;source_modes=None
     if not kwargs.get('writable',False):
         source=workspace_snapshot(root)
+        source_modes=snapshot_modes(root,source)
     try:return adapter.run(prompt,**kwargs)
     finally:
         after=files(root,patterns)
-        changed=[p for p in before.keys()|after.keys() if before.get(p)!=after.get(p)]
+        after_modes=snapshot_modes(root,after)
+        changed=[p for p in before.keys()|after.keys() if before.get(p)!=after.get(p) or before_modes.get(p)!=after_modes.get(p)]
         journal='.sdd/journal/events.jsonl'
         pause_marker='.sdd/runtime/pause-requested'
         if journal in changed and after.get(journal,b'').startswith(before.get(journal,b'')) and (root/pause_marker).exists():
@@ -254,14 +362,16 @@ def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
                 if name in before:
                     if path.is_dir():shutil.rmtree(path)
                     path.parent.mkdir(parents=True,exist_ok=True);path.write_bytes(before[name])
+                    if name in before_modes:path.chmod(before_modes[name])
                 elif path.exists():path.unlink()
             material=[p for p in changed if not regenerable(p)]
             if material:
                 violations.append('Agent modified protected controller files; restored: '+', '.join(material))
         if source is not None:
             restore_workspace(root, source)
+            restore_modes(root, source_modes or {})
         if git_state()!=original:
             restore_git_state(root, original)
-            violations.append('Agent changed Git HEAD, branch or index; inspect working tree')
+            violations.append('Agent changed Git HEAD, branch or index, refs, config, or hooks; inspect working tree')
         if violations:
             raise RuntimeError('; '.join(violations))

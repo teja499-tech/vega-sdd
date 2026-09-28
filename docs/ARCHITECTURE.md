@@ -52,7 +52,7 @@ The controller selects one lifecycle skill for the current phase and a small set
 
 Roles are independent of skills: developer or QA is the primary perspective, with security, integration, reliability, performance, E2E, or agent-system reviewers added when the routed risks require them. Roles and skills guide judgment; they never grant tools, approve a change, or write canonical state. The controller and adapter enforce those boundaries.
 
-For real-agent projects, workspace approval binds the execution policy and a digest of the governing agent instructions, roles, and skills. Editing a capability invalidates approval. This makes project-local extensions reviewable instead of silently executable.
+For real-agent projects, workspace approval binds the execution policy and a bounded digest of governing instructions across `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`, nested instruction files, Copilot/Cursor configuration, vendor agent copies, roles, and skills. Editing a capability invalidates approval. Initialization runs in an isolated framework workspace with a bounded source copy that omits those instructions and common secret files; after initialization, every real-agent entry point requires current approval.
 
 ## State model
 
