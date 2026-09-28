@@ -54,6 +54,23 @@ def test_existing_agents_file_is_preserved_and_extended(demo_repo: Path):
     assert "UNIVERSAL_SDD_START" in text
 
 
+def test_scaffold_refresh_upgrades_stub_skills(demo_repo: Path):
+    result = runner.invoke(app, ["init", "--root", str(demo_repo), "--agent", "mock", "--project-kind", "new", "--yes"])
+    assert result.exit_code == 0
+    stub = demo_repo / ".agents" / "skills" / "implement-task" / "SKILL.md"
+    stub.write_text("# Implement Task\nRead spec. Make changes.\n", encoding="utf-8")
+    checklist = demo_repo / ".agents" / "skills" / "review-task" / "SKILL.md"
+    checklist.write_text("---\nname: review-task\ndescription: old\n---\n# Review Task\n\n## Goal\nRead the diff.\n", encoding="utf-8")
+    custom = demo_repo / ".agents" / "skills" / "docs-writer" / "SKILL.md"
+    custom.write_text("# Custom writer\n" + ("keep this house style\n" * 20), encoding="utf-8")
+    result = runner.invoke(app, ["scaffold", "--root", str(demo_repo)])
+    assert result.exit_code == 0, result.output
+    assert "Required output" in (demo_repo / ".agents" / "skills" / "api-design" / "SKILL.md").read_text()
+    assert "working set" in stub.read_text().lower() or "context pack" in stub.read_text().lower()
+    assert "## Directory map" in checklist.read_text()
+    assert "keep this house style" in custom.read_text()
+
+
 def test_force_reinit_replaces_sdd_state(demo_repo: Path):
     result = runner.invoke(app, ["init", "--root", str(demo_repo), "--agent", "mock", "--project-kind", "new", "--yes"])
     assert result.exit_code == 0

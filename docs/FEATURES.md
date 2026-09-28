@@ -1,245 +1,252 @@
-> **Vega SDD 0.3.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical.
+# Vega SDD feature reference
 
-# v0.1.2 update
+This reference describes the capabilities available in Vega SDD 0.4.0. For an executable walkthrough, use the [user guide](USER_GUIDE.md) or [use-case journeys](USE_CASES.md).
 
-Human HLD/LLD/database/API/operations documentation, human changelog, spec revision diffs and Git attribution are now available. See [full documentation and commands](HUMAN_DOCUMENTATION.md).
+## Product discovery and specification
 
-> **0.1.1 audit status:** Experimental controller. See the [verification report](VERIFICATION_REPORT.md) for tested behavior, defects repaired, missing features, and live-provider limitations. Earlier broad descriptions below are not certification.
+### PRD-first initialization
 
-# Vega SDD Feature Reference
+`sdd init` accepts a normal Markdown/text PRD and performs product discovery, an architecture workshop, specification generation, and traceability validation. Users do not need to author a proprietary schema.
 
-This document is a feature reference inherited from the 0.1.0 release; consult the project lifecycle guide for newer capabilities. It explains what each capability does, why it exists, and how to use it effectively.
+### Material clarification interview
 
-## 1. PRD-first initialization
+Initialization records questions that can materially change behavior, scope, data, security, architecture, deployment, or operations. Answers survive agent sessions under `.sdd/product/`.
 
-**Command:** `sdd init`
+### Interactive architecture decisions
 
-A project may begin with only a normal Markdown/text PRD. No proprietary YAML authoring format is required from the user.
+For every relevant decision, Vega presents context, credible options, tradeoffs, fit, and a recommendation. The user can select, ask a follow-up, provide another option, or defer. Selected decisions become ADRs and structured state.
 
-Initialization performs four stages:
+### Stable requirements and acceptance criteria
 
-1. product discovery,
-2. architecture workshop,
-3. specification generation,
-4. readiness/traceability validation.
+Requirements have stable IDs, priority, source, and observable acceptance criteria. Features and tasks trace back to those IDs. `sdd verify` rejects missing or broken references.
 
-**Best use:** Make the PRD clear about users, major workflows, business rules, non-negotiables, and out-of-scope behavior. It does not need technology choices unless those are already constraints.
+### Feature and task dependency graph
 
-**Existing projects:** use `--project-kind existing`. The initializer samples repository structure and Git state so generated specs do not pretend the PRD is the only source of current reality.
+Features and tasks declare dependencies. The scheduler selects only dependency-ready work and carries stable unaffected IDs through approved changes.
 
-## 2. Material clarification interview
+### New and existing systems
 
-During product discovery the selected agent returns only questions that can materially affect product behavior, data model, security, architecture, deployment, or scope. SDD records answers in `.sdd/product/clarifications.md` and feeds them into subsequent design.
+`--project-kind new` creates a greenfield plan. `--project-kind existing` adds a bounded, isolated source view and repository evidence so planning can account for current code without pre-approving repository agent instructions.
 
-**Best use:** answer behavior/scope questions during init. Engineering details that can be safely delegated should remain autonomous.
+## Agent orchestration
 
-## 3. Interactive architecture workshop
+### Supported primary adapters
 
-Architecture decisions are generated specifically for the project. The system should not ask about Kafka, a vector database, GPU infrastructure, etc. unless requirements make them relevant.
+- Cursor
+- Codex
+- Claude Code
+- Gemini CLI
+- GitHub Copilot CLI
+- deterministic mock adapter
 
-For each decision SDD presents:
-
-- decision context,
-- 2–5 credible options,
-- fit,
-- summary/tradeoffs,
-- an architect recommendation and rationale,
-- choices to accept, ask the architect, select another option, or defer.
-
-Approved selections are written as ADR-style files in `.sdd/decisions/` and structured state in `.sdd/state/architecture-decisions.yaml`.
-
-**Best use:** treat recommendations as decision support, not automatic truth. The user remains the final authority for consequential technology choices.
-
-## 4. Current-option architecture research boundary
-
-Architecture prompts direct capable coding agents to compare current, production-grade options. The SDD core does not hard-code "FastAPI is always best" or an eternal cloud matrix.
-
-**Best use:** use an agent with web/research access during initialization when current market comparison matters. Record explicit organizational constraints in the PRD or clarifications.
-
-## 5. Stable structured requirements
-
-Generated requirements have stable IDs, type, priority, source, and testable acceptance criteria. They are persisted in both human-readable Markdown and machine-readable YAML.
-
-**Best use:** avoid manually renumbering IDs. Changes should go through `sdd change` so impact and stale evidence can be handled deliberately.
-
-## 6. Feature decomposition and dependency DAG
-
-Features contain requirements, dependencies, bounded tasks, and verification criteria. The development scheduler selects only work whose feature/task dependencies are verified.
-
-**Best use:** tasks should be small enough for a bounded coding-agent run. If a generated task is broad, refine it before implementation rather than relying on one huge session.
-
-## 7. Project-owned Agent Skills
-
-`/.agents/skills/` is canonical and contains reusable workflows such as architecture design, feature specification, task implementation, verification, security review, drift detection, and reconciliation.
-
-**Best use:** add project/domain-specific skills here (for example `database-migration`, `fastapi-api`, `terraform-module`, or `hipaa-data-handling`) rather than bloating `AGENTS.md`.
-
-## 8. Project-owned specialist roles
-
-`/.agents/roles/` defines architect, developer, QA, security, spec, and integration reviewer responsibilities. Thin copies/adapters are materialized for supported coding-agent conventions.
-
-**Best use:** keep role definitions narrow. Review roles should not inherit a long developer conversation as authority; they should inspect spec, diff, tests, and evidence.
-
-## 9. Vendor-neutral primary agent
-
-The configured agent lives in `.sdd/config.yaml` and can be changed with:
+The primary agent can be changed without moving canonical state:
 
 ```bash
-sdd agent use cursor
-sdd agent use codex
 sdd agent use claude
 ```
 
-Specs and state do not move.
+### Bounded implementation
 
-**Best use:** switch agents at a clean task boundary when practical. Run `sdd doctor` after moving to a new workstation/toolchain.
+Each agent call receives one task, applicable acceptance criteria, a working set, recent findings, Graphify context when available, and the selected roles/skills. The controller, not the agent, chooses and advances lifecycle state.
 
-## 10. Capability doctor
+### Isolated or distinct review and repair
 
-**Command:** `sdd doctor`
+After deterministic checks, a fresh review pass maps the implementation to acceptance criteria. By default this is isolated self-review in a new subprocess of the selected provider. Blocking findings enter a bounded repair loop. Low/warning findings that do not violate acceptance criteria are recorded without blocking.
 
-Detects supported CLIs and reports key adapter capabilities such as structured output, streaming, resume, and interruption support.
-
-**Best use:** run before first initialization and whenever an agent CLI is upgraded substantially.
-
-## 11. Autonomous task execution
-
-**Command:** `sdd start`
-
-The controller:
-
-1. validates traceability,
-2. selects the next ready task,
-3. persists current state,
-4. invokes the primary coding agent with a bounded task prompt,
-5. records implementation completion,
-6. runs configured deterministic checks,
-7. invokes independent review,
-8. auto-repairs failed reviews up to the configured limit,
-9. records verification evidence,
-10. publishes progress,
-11. advances to the next ready task.
-
-**Best use:** configure real test/lint/typecheck commands before long autonomous runs.
-
-## 12. Independent review and bounded auto-repair
-
-The implementation pass is not trusted to self-certify. A separate review prompt compares current diff/implementation against the task specification. Failures enter an auto-repair loop capped by `max_repair_attempts`.
-
-**Best use:** keep repair caps modest (default 3). Repeated failure usually indicates ambiguity, architectural mismatch, or a defect needing human intervention—not a reason to loop forever.
-
-## 13. Deterministic verification hooks
-
-Configuration fields:
+Set a distinct provider when required:
 
 ```yaml
-test_command: null
-lint_command: null
-typecheck_command: null
+primary_agent: cursor
+review_agent: claude
+require_distinct_review_agent: true
 ```
 
-When set, these execute after implementation. Failures block the task before an LLM reviewer can call it complete.
+### Single-writer control
 
-**Best use:** make commands deterministic, non-interactive, scoped to the repository, and suitable for repeated execution.
+Only one Vega controller writer runs for a repository/common Git directory at a time. Read-only questions and intervention calls are serialized around state-sensitive work. Linked worktrees share the lock.
 
-## 14. Requirement traceability validation
+### Foreground execution
 
-**Command:** `sdd verify`
+`sdd start` remains in the foreground for visible events and predictable interruption. `sdd pause` and Ctrl+C request a stop at a task boundary. `sdd resume` reconstructs work from repository state.
 
-Checks that:
+## Skills and roles
 
-- MUST requirements belong to a feature,
-- MUST requirements map to implementation tasks,
-- referenced requirement/feature/task IDs exist,
-- dependency links point to real items,
-- tasks expose verification criteria,
-- requirements have acceptance criteria (error if missing).
+### Progressive skill disclosure
 
-**Best use:** run after any manual edit under `.sdd/`, and in CI for repositories that adopt the framework deeply.
+Runbooks live under `.agents/skills/`. Prompts carry compact metadata and exact paths; the agent loads only selected skill bodies. This avoids injecting the full catalog into every task.
 
-## 15. Durable progress status
+### Risk routing
 
-**Commands:** `sdd status`, `sdd watch`
+Packaged runbooks cover:
 
-Progress is derived from canonical state, not from an agent's narrative. Separate specification, implementation, and verification progress are shown.
+- implementation and review;
+- architecture and feature specification;
+- API, data model, and UX design;
+- security review and threat modeling;
+- reliability and performance review;
+- migration safety and E2E testing;
+- AI/agent-system review;
+- documentation, reconciliation, drift, and feature verification.
 
-`STATUS.md` is also published into `.sdd/` for easy inspection and versioning.
+Routing metadata selects specialist skills by phase and bounded task text. Common auth/OAuth/OIDC/JWT/password, PII, encryption/KMS, payment, retry, timeout, migration, performance, E2E, and agent terminology is recognized.
 
-## 16. Safe pause and resume
+### Project-specific skills
 
-**Commands:** `sdd pause`, `sdd resume`
+Tasks may name up to eight safe non-lifecycle skills. A missing, unsafe, oversized, or symlinked skill fails before execution. Project-local skill bodies remain outside initialization prompts until capability approval.
 
-`pause` requests a safe task-boundary stop. Ctrl+C during a foreground run also transitions canonical state to paused. `resume` reconstructs work from `.sdd/state/` and does not require the prior chat.
+### Specialist roles
 
-**Best use:** deliberately start fresh agent contexts on long projects. Durable state is designed to make clearing conversational context healthy rather than dangerous.
+Planner, architect, developer, QA, security, spec, integration, reliability, performance, E2E, and agent-system perspectives are separate from permissions. Roles guide judgment; they do not grant tools or approve state changes.
 
-## 17. Recovery of implemented-but-not-reviewed work
+## Verification and evidence
 
-If a process ends after a task is marked `implemented` but before review, the scheduler can select the task again and resume at verification rather than blindly reimplementing it.
+### Typed workspace policy
 
-**Best use:** do not manually flip task statuses. Let recovery semantics preserve evidence and avoid duplicate work.
+`.sdd/workspace.yaml` describes components, project kinds, dependency order, commands, waivers, builds, artifacts, repository policy, environments, timeouts, and protected paths.
 
-## 18. Architect intervention shell
+Supported component kinds:
 
-**Command:** `sdd intervene`
+- web
+- service
+- library
+- CLI
+- data pipeline
+- ML
+- infrastructure
+- mobile
+- desktop
+- embedded
+- docs
+- custom
 
-Starts a read-only architecture conversation grounded in current product, architecture, roadmap, status, and specs. It is intended for questions such as:
+Each kind requires appropriate named checks or substantive waivers.
 
-- Why is Redis here?
-- Is this implementation following the approved auth flow?
-- Which spec defines this behavior?
-- What would be affected if we changed X?
+### Deterministic checks
 
-Prefix an intervention with `change:` to classify a concern without applying it.
+Commands execute as argv with timeouts and declared environment-variable names. Failures block task/release evidence before an AI reviewer can claim success. Full checks bind evidence to a source, policy, and capability fingerprint.
 
-## 19. Problem/change classification
+### Traceability
 
-**Command:** `sdd change "description"`
+Vega validates requirement → acceptance criterion → feature → task → evidence links. Status separates specification, implementation, and verification progress.
 
-The architect classifies the concern as implementation defect, spec defect, requirement change, architecture change, or unknown and returns affected IDs plus proposed action.
+### Evidence-aware review policy
 
-This prevents a common failure mode: changing the specification to match incorrect code.
+Critical/high findings and security, data-loss, or integrity failures block. Medium findings block when they violate acceptance criteria. Reviewer confidence alone cannot override deterministic failures.
 
-## 20. Auto-repair for implementation defects
+### Human and machine views
 
-If the existing spec is correct, the controller creates a repair task under the affected feature. No product/spec approval is required because intent is unchanged.
+Markdown supports people and agent inspection. YAML/JSON supports validated state transitions. Generated views do not become canonical merely because someone edits the Markdown.
 
-**Best use:** report observed behavior precisely. The classifier can then compare it against acceptance criteria instead of guessing the desired result.
+## Project intelligence
 
-## 21. Explicit approval for intent mutation
+### Read-only project copilot
 
-Spec, requirement, and architecture changes require approval. Use an interactive confirmation or `--approve` for an already reviewed change.
+`sdd ask` answers from approved specs, ADRs, project state, and Graphify context. It cannot mutate the plan.
 
-The reconciliation step requests a structured revised bundle, preserves stable IDs/status for unaffected work, invalidates affected task evidence, rewrites generated views, and reruns traceability.
+### Interactive architect
 
-**Best use:** review the printed impact before approval. The framework deliberately does not hide consequential changes inside autonomous implementation.
+`sdd intervene` supports longer read-only diagnosis. Prefixing a prompt with `change:` previews classification/impact.
 
-## 22. Append-only event journal
+### Graphify retrieval
 
-**Command:** `sdd log`
+`sdd graph refresh` writes a deterministic SDD traceability corpus and builds/updates a local code graph when Graphify is installed. Queries merge corpus and code-graph results. `.sdd/state/` remains canonical.
 
-`.sdd/journal/events.jsonl` records initialization, run starts, task transitions, checks, review failure/repair, pause, changes, and completion.
+### Headroom compression
 
-**Best use:** use the journal for debugging/recovery and future analytics. Do not rewrite history to make a run look cleaner.
+Headroom optionally compresses context excerpts and check logs. Originals stay under `.sdd/runtime/originals/`; missing or ineffective compression never blocks work and does not create a token-stop policy.
 
-## 23. Human-readable and machine-readable dual artifacts
+## Change management
 
-Humans get Markdown ADRs/specs/status. The scheduler gets structured YAML. This avoids forcing people to read machine state while also avoiding fragile Markdown parsing for core orchestration.
+### Defect versus intent classification
 
-## 24. Thin vendor adapters
+`sdd change` separates implementation defects from spec defects, requirement changes, and architecture changes. Incorrect code becomes repair work instead of silently weakening the spec.
 
-The repo creates compatibility surfaces for Cursor/Claude/Codex while keeping canonical methodology under `.sdd/` and `.agents/`.
+### Explicit intent approval
 
-**Best use:** do not hand-maintain different product rules in `.cursor`, `.claude`, and `.codex`. Tool-specific files should point back to the shared contract.
+Requirement/architecture mutations show affected IDs and require CLI confirmation or `--approve`. MCP change requests are preview-only.
 
-## 25. Foreground execution in V1
+### Conservative invalidation
 
-V1 intentionally runs `sdd start` in the foreground. This makes interrupts and terminal visibility predictable. `sdd watch` is useful when another process/terminal is performing updates, but a durable daemon is not yet part of V1.
+Approved reconciliation preserves stable unaffected state, invalidates affected tasks/dependents, clears stale evidence, refreshes projections, and revalidates traceability.
 
-A later release can add detached execution without changing project-state semantics.
+### Clarifications and retry
 
-## 26. One primary writer in V1
+`sdd clarify` resolves material questions. `sdd task retry --keep-code` requeues failed work without discarding the working tree.
 
-V1 does not allow multiple concurrent implementation agents to edit the repo. That is intentional: it avoids merge/worktree/dependency races while still allowing independent review passes through the selected agent.
+## Human documentation and history
 
-The task DAG is designed so parallel workers can be added later behind explicit worktree/merge coordination.
+### Generated design pack
+
+Applicable documents include system overview, HLD, LLD, database design, API design, security, operations, test plan, existing-system analysis, contributing, release plan, and traceability.
+
+### Read-only enrichment
+
+`sdd docs refresh --enrich` asks the selected agent to inspect code and approved intent without changing requirements/ADRs/task state. Structured output is validated before replacing design-document data.
+
+### Human changelog and spec diffs
+
+`.sdd/CHANGELOG.md` projects lifecycle events into readable history. Content-addressed snapshots and exact spec transitions live under `.sdd/history/specs/`.
+
+### Commit attribution
+
+Vega can link commits through exact `SDD-Task:` trailers or explicit `sdd link-commit`. It never treats an unrelated latest commit as task evidence.
+
+## Delivery lifecycle
+
+### Protected execution branches
+
+`sdd repo branch` creates policy-named work branches and supports linked worktrees. Protected, detached, unborn, or dirty unsafe starts are rejected.
+
+### Repository scaffolding
+
+`sdd repo scaffold` adds missing CODEOWNERS/PR/issue/security/support/contribution starters without overwriting owner files.
+
+### Hosted PR policy
+
+GitHub and trusted command-provider hooks support PR creation, status, and merge. Merge checks expected head/base, draft state, review, mergeability, and required checks. Push/merge/auto-commit default off.
+
+### Non-overwriting CI export
+
+`sdd pipeline export` writes a frozen standalone checker and provider templates for GitHub, GitLab, or Azure. Existing files are preserved; `--update-generated` replaces only unchanged generated copies.
+
+### Immutable releases and environment receipts
+
+Builds hash configured artifacts and bind them to source/policy/check evidence. Deployment hooks receive a release manifest; they must deploy the recorded digest instead of rebuilding mutable source.
+
+### Rollback and reconciliation
+
+Deploy/smoke timeouts become unknown external state and block blind retry. `release reconcile` records an operator-confirmed outcome. Rollback targets a recorded prior successful version through an explicit project hook.
+
+### Portfolio checks
+
+`sdd project portfolio-check` runs dependency-ordered local checks across repositories. It does not claim atomic multi-repository deployment.
+
+## Recovery and safety
+
+### Durable pause/resume
+
+Task/feature state, event journal, evidence, baselines, and recovery checkpoints let a new process or provider resume without an old conversation.
+
+### Projection transactions
+
+Canonical multi-file projections use rollback snapshots. Corrupt or incomplete transaction evidence fails closed and remains available for inspection.
+
+### Read-only restoration
+
+Read-only agent calls restore accidental source content/mode changes and Git HEAD, refs, index, config, and hooks, including linked-worktree common metadata.
+
+### Capability approval
+
+Real-agent execution binds approval to workspace policy and provider-visible instructions/settings/skills/context filters. Changes invalidate approval until reviewed and reconfigured.
+
+### Bounded snapshots/catalogs
+
+Repository snapshots, source views, and skill/capability catalogs have explicit count/byte limits to prevent unbounded memory use. Snapshot limits can be deliberately raised with `SDD_GUARD_MAX_FILES`, `SDD_GUARD_MAX_BYTES`, and `SDD_GUARD_MAX_FILE_BYTES`.
+
+### Honest boundary
+
+The guard detects/restores repository mutations; it is not an OS sandbox. Provider sandboxing, credentials, network policy, secret handling, host branch protection, and application-specific controls remain required.
+
+## Tested examples
+
+The 0.4.0 suite covers 205 tests, Python 3.11/3.12 CI, wheel/sdist builds, an incident-service lifecycle benchmark, and Python library, CLI, SQLite pipeline, and Node web cross-project benchmarks. See [verification evidence](VERIFICATION_0.4.0.md).

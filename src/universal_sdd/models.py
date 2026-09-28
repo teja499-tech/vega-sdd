@@ -16,7 +16,18 @@ class AgentName(str, Enum):
     cursor = "cursor"
     codex = "codex"
     claude = "claude"
+    gemini = "gemini"
+    copilot = "copilot"
     mock = "mock"
+
+
+PRIMARY_AGENTS = (
+    AgentName.cursor,
+    AgentName.codex,
+    AgentName.claude,
+    AgentName.gemini,
+    AgentName.copilot,
+)
 
 
 class ProjectKind(str, Enum):
@@ -26,6 +37,7 @@ class ProjectKind(str, Enum):
 
 class RunStatus(str, Enum):
     not_started = "not_started"
+    initializing = "initializing"
     ready = "ready"
     running = "running"
     paused = "paused"
@@ -66,6 +78,12 @@ class SDDConfig(BaseModel):
     test_command: str | None = None
     lint_command: str | None = None
     typecheck_command: str | None = None
+    require_resolved_clarifications: bool = True
+    allow_unrestricted_agent: bool = False
+    review_agent: AgentName | None = None
+    require_distinct_review_agent: bool = False
+    enable_headroom: bool = True
+    max_review_files: int = 15
 
 
 class ArchitectureOption(BaseModel):
@@ -111,6 +129,27 @@ class Requirement(BaseModel):
 
 
 class Task(BaseModel):
+    @field_validator("skills")
+    @classmethod
+    def safe_skills(cls, values):
+        import re
+        lifecycle = {
+            "implement-task", "review-task", "architecture-design", "create-feature-spec",
+            "reconcile", "spec-drift", "verify-feature",
+        }
+        cleaned = []
+        for value in values:
+            value = str(value).strip()
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+                raise ValueError(f"Unsafe skill name: {value}")
+            if value in lifecycle:
+                raise ValueError(f"Lifecycle skill cannot be selected by a task: {value}")
+            if value not in cleaned:
+                cleaned.append(value)
+        if len(cleaned) > 8:
+            raise ValueError("A task may name at most 8 skills")
+        return cleaned
+
     id: str
     feature_id: str
     title: str
@@ -118,6 +157,11 @@ class Task(BaseModel):
     implements: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
+    check_paths: list[str] = Field(default_factory=list)
+    check_command: str | None = None
+    skills: list[str] = Field(default_factory=list)
+    working_set: list[str] = Field(default_factory=list)
+    last_findings: list[dict[str, Any]] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.pending
     attempts: int = 0
     evidence: list[str] = Field(default_factory=list)
@@ -138,6 +182,12 @@ class Feature(BaseModel):
     requirements: list[str] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     tasks: list[Task] = Field(default_factory=list)
+    invariants: list[str] = Field(default_factory=list)
+    non_goals: list[str] = Field(default_factory=list)
+    test_matrix: list[str] = Field(default_factory=list)
+    api_contract: str = ""
+    ux_contract: str = ""
+    target_files: list[str] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.pending
 
 
@@ -189,6 +239,8 @@ class ProjectState(BaseModel):
     last_checkpoint: str | None = None
     pause_requested: bool = False
     stop_requested: bool = False
+    tokens_used: int = 0
+    tokens_this_run: int = 0
     updated_at: str = Field(default_factory=utcnow)
 
 
@@ -248,6 +300,8 @@ class AgentResult(BaseModel):
     session_id: str | None = None
     raw: Any = None
     exit_code: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
 
 
 class RepoContext(BaseModel):

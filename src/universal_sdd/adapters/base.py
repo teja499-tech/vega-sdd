@@ -13,6 +13,49 @@ from typing import Callable, Iterable
 from ..models import AgentCapabilities, AgentEvent, AgentResult
 
 EventCallback = Callable[[AgentEvent], None]
+UNRESTRICTED_ENV = "SDD_ALLOW_UNRESTRICTED"
+
+
+WRITE_MARKERS = (
+    "--force",
+    "--yolo",
+    "--allow-all",
+    "--allow-tool",
+    "auto_edit",
+    "workspace-write",
+    "acceptEdits",
+    "accept-edits",
+)
+
+
+VENDOR_WRITE_POLICY = {"cursor", "codex", "claude", "gemini", "copilot"}
+
+
+def assert_writable_command(name: str, cmd: list[str]) -> None:
+    """Fail fast when a vendor writable run has no least-privilege or unrestricted write flag."""
+    if name not in VENDOR_WRITE_POLICY:
+        return
+    joined = " ".join(cmd)
+    if name == "cursor" and "--mode" not in cmd:
+        return
+    if any(marker in joined for marker in WRITE_MARKERS):
+        return
+    raise RuntimeError(
+        f"{name} cannot write under the selected policy. "
+        "Use the adapter's workspace-scoped edit mode or set allow_unrestricted_agent."
+    )
+
+
+def unrestricted_agent_allowed(root: Path) -> bool:
+    """Writable runs stay sandboxed unless the project owner opts in."""
+    flag = os.environ.get(UNRESTRICTED_ENV, "")
+    if flag.strip().lower() in {"1", "true", "yes"}:
+        return True
+    try:
+        from ..storage import SDDPaths, load_config
+        return bool(load_config(SDDPaths(root)).allow_unrestricted_agent)
+    except Exception:
+        return False
 
 
 class AgentAdapter(ABC):
@@ -40,6 +83,8 @@ class AgentAdapter(ABC):
         env: dict[str, str] | None = None,
     ) -> AgentResult:
         cmd = self.build_command(prompt, writable=writable, mode=mode)
+        if writable:
+            assert_writable_command(self.name, cmd)
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)
@@ -56,6 +101,17 @@ class AgentAdapter(ABC):
             )
         except FileNotFoundError:
             return AgentResult(success=False, text=f"Agent command not found: {cmd[0]}", exit_code=127)
+        except OSError as exc:
+            # macOS ARG_MAX / exec failures surface here (large PRD-as-argv).
+            # Return a structured failure instead of crashing the controller.
+            redacted = ["<prompt>" if c == prompt else c for c in cmd]
+            return AgentResult(
+                success=False,
+                text=f"Failed to launch agent '{cmd[0]}': {exc}. "
+                "If the PRD/prompt is very large, the prompt-as-argv transport may have hit OS argument limits.",
+                exit_code=127,
+                raw={"stdout": [], "stderr": [str(exc)], "command": redacted},
+            )
 
         stdout_lines: list[str] = []
         stderr_lines: list[str] = []
@@ -97,7 +153,11 @@ class AgentAdapter(ABC):
             text=("Agent timed out. " + text) if timed_out else text,
             events=[e for line in stdout_lines if (e := self.parse_event(line))],
             exit_code=code,
-            raw={"stdout": stdout_lines, "stderr": stderr_lines, "command": cmd[:-1] + ["<prompt>"]},
+            raw={
+                "stdout": stdout_lines,
+                "stderr": stderr_lines,
+                "command": ["<prompt>" if c == prompt else c for c in cmd],
+            },
         )
 
     def parse_event(self, line: str) -> AgentEvent | None:

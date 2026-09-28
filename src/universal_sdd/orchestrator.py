@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 import uuid
 import tempfile
@@ -9,9 +10,9 @@ from pathlib import Path
 from typing import Callable
 
 from .adapters import get_adapter
-from .artifacts import project_context, write_architecture, write_spec_bundle
+from .artifacts import project_context, projection_transaction, write_architecture, write_spec_bundle
 from .journal import Journal
-from .json_utils import extract_json
+from .json_utils import extract_json, parse_structured
 from .models import (
     AgentEvent,
     ChangeRequest,
@@ -25,9 +26,16 @@ from .models import (
     AgentName,
     SpecBundle,
 )
+from .clarifications import assert_start_ready
+from .context_pack import build_context_pack, persist_working_set, rebuild_review_pack, skills_for_phase
+from .project_graph import refresh_graph
 from .prompts import change_analysis_prompt, implement_task_prompt, repair_task_prompt, review_task_prompt, reconcile_change_prompt
+from .review_policy import apply_review_policy, review_allows_progress
 from .status import load_features, publish_status
 from .storage import single_writer, SDDPaths, dump_yaml, load_config, load_project_state, load_yaml, save_project_state
+from .task_checks import commands_for_task, compact_output, infer_check_paths, owner_command_argv
+from .compress import compress_for_prompt
+from .tokens import record_usage
 from .traceability import validate_traceability
 
 
@@ -50,7 +58,7 @@ def select_next(features: list[Feature]) -> tuple[Feature, Task] | None:
         for task in feature.tasks:
             if task.status == ItemStatus.verified:
                 continue
-            if task.status == ItemStatus.blocked:
+            if task.status in {ItemStatus.blocked, ItemStatus.failed}:
                 continue
             if _task_ready(task, tmap):
                 return feature, task
@@ -65,8 +73,10 @@ def _save_features(paths: SDDPaths, features: list[Feature]) -> None:
             dump_yaml(candidates[0] / "state.yaml", feature)
 
 
-def _run_check(command: str, root: Path, task_id: str, kind: str = "test") -> VerificationResult:
-    process = subprocess.Popen(command, cwd=root, shell=True, stdout=subprocess.PIPE,
+def _run_check(command: str | list[str], root: Path, task_id: str, kind: str = "test") -> VerificationResult:
+    argv = command if isinstance(command, list) else owner_command_argv(command)
+    display = shlex.join(argv) if argv else ""
+    process = subprocess.Popen(argv, cwd=root, shell=False, stdout=subprocess.PIPE,
                                stderr=subprocess.PIPE, text=True, start_new_session=(os.name != "nt"))
     try:
         stdout, stderr = process.communicate(timeout=300)
@@ -77,15 +87,28 @@ def _run_check(command: str, root: Path, task_id: str, kind: str = "test") -> Ve
             process.kill()
         process.communicate()
         raise
-    summary = (stdout + "\n" + stderr).strip()[-4000:]
+    raw = (stdout + "\n" + stderr).strip()
+    summary = compact_output(raw)
     return VerificationResult(
         id=f"VER-{uuid.uuid4().hex[:8].upper()}",
         task_id=task_id,
         kind=kind,
         status="pass" if process.returncode == 0 else "fail",
-        command=command,
+        command=display,
         summary=summary,
     )
+
+
+def invoke_agent(adapter, prompt: str, root: Path, *, writable: bool, mode: str, on_event=None, protected=()):
+    """Every agent invocation goes through the mutation guard."""
+    from .agent_guard import guarded_run
+    return guarded_run(adapter, prompt, root, protected, writable=writable, mode=mode, on_event=on_event)
+
+
+def _agent_call(adapter, prompt: str, *, paths: SDDPaths, state: ProjectState, task_id: str | None, phase: str, root: Path, protected, writable: bool, mode: str, on_event):
+    result = invoke_agent(adapter, prompt, root, writable=writable, mode=mode, on_event=on_event, protected=protected)
+    record_usage(paths, state, task_id=task_id, phase=phase, prompt=prompt, result=result)
+    return result
 
 
 def _append_verification(paths: SDDPaths, result: VerificationResult) -> None:
@@ -94,21 +117,124 @@ def _append_verification(paths: SDDPaths, result: VerificationResult) -> None:
     dump_yaml(paths.verification_file, rows)
 
 
+def _feature_evidence_gaps(paths: SDDPaths, feature: Feature) -> list[str]:
+    """Deterministic verify-feature contract: every task verified, every requirement has evidence."""
+    gaps: list[str] = []
+    unverified = [task.id for task in feature.tasks if task.status != ItemStatus.verified]
+    if unverified:
+        gaps.append("unverified tasks: " + ", ".join(unverified))
+    rows = load_yaml(paths.verification_file, []) or []
+    passing = {
+        row.get("id")
+        for row in rows
+        if isinstance(row, dict) and row.get("id") and row.get("status") in {"pass", "warning"}
+    }
+    req_ids = list(feature.requirements) or sorted({rid for task in feature.tasks for rid in task.implements})
+    for req_id in req_ids:
+        owners = [task for task in feature.tasks if req_id in task.implements]
+        if not owners:
+            gaps.append(f"{req_id}: no task implements this requirement")
+            continue
+        evidence = [eid for task in owners for eid in task.evidence if eid in passing]
+        if not evidence:
+            gaps.append(f"{req_id}: no passing evidence ids")
+    return gaps
+
+
+def _verify_feature(root, paths, config, feature, task, workspace, journal, state, features) -> bool:
+    """Controller-owned feature verification. Implements the verify-feature contract in-process."""
+    from .skill_library import lifecycle_skill
+    from .workspace import run_checks
+
+    skill = lifecycle_skill("verify")
+    gaps = _feature_evidence_gaps(paths, feature)
+    if gaps:
+        task.status = ItemStatus.failed
+        feature.status = ItemStatus.in_progress
+        _save_features(paths, features)
+        state.run_status = RunStatus.blocked
+        save_project_state(paths, state)
+        journal.append(
+            "feature_evidence_missing",
+            feature=feature.id,
+            skill=skill,
+            executor="controller",
+            gaps=gaps,
+        )
+        return False
+    if config.test_command:
+        suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
+        _append_verification(paths, suite)
+        journal.append(
+            "feature_suite",
+            feature=feature.id,
+            status=suite.status,
+            skill=skill,
+            executor="controller",
+        )
+        if suite.status == "fail":
+            task.status = ItemStatus.failed
+            feature.status = ItemStatus.in_progress
+            _save_features(paths, features)
+            state.run_status = RunStatus.blocked
+            save_project_state(paths, state)
+            journal.append("feature_suite_failed", feature=feature.id, evidence=suite.summary)
+            return False
+    if workspace:
+        release = run_checks(root, phase="feature")
+        journal.append(
+            "feature_workspace_checks",
+            feature=feature.id,
+            passed=release.get("passed"),
+            skill=skill,
+            executor="controller",
+        )
+        if not release.get("passed"):
+            task.status = ItemStatus.failed
+            feature.status = ItemStatus.in_progress
+            _save_features(paths, features)
+            state.run_status = RunStatus.blocked
+            save_project_state(paths, state)
+            journal.append("feature_suite_failed", feature=feature.id, evidence=release)
+            return False
+    journal.append(
+        "feature_verified",
+        feature=feature.id,
+        skill=skill,
+        executor="controller",
+        requirements=list(feature.requirements),
+    )
+    return True
+
+
 @single_writer
 def run_development(
     root: Path,
     *,
     max_tasks: int | None = None,
     on_event: Callable[[AgentEvent], None] | None = None,
+    accept_deferred: bool = False,
 ) -> ProjectState:
     paths = SDDPaths(root)
     config = load_config(paths)
     state = load_project_state(paths)
     journal = Journal(paths.event_log)
+    if not state.initialized:
+        raise RuntimeError("Initialization is incomplete. Run `sdd init` to finish product, architecture, and spec generation.")
+    assert_start_ready(paths, accept_deferred=accept_deferred)
+    if config.require_distinct_review_agent:
+        if not config.review_agent or config.review_agent == config.primary_agent:
+            raise RuntimeError(
+                "require_distinct_review_agent is set. Configure review_agent to a different installed adapter "
+                "than primary_agent. The default isolated subprocess is self-review, not independent review."
+            )
     adapter = get_adapter(config.primary_agent, root)
+    reviewer = get_adapter(config.review_agent or config.primary_agent, root)
     caps = adapter.capabilities()
     if not caps.installed:
         raise RuntimeError(f"Selected agent `{config.primary_agent.value}` is not installed. Run `sdd doctor`.")
+    if config.review_agent and not reviewer.capabilities().installed:
+        raise RuntimeError(f"Configured review agent `{config.review_agent.value}` is not installed. Run `sdd doctor`.")
 
     trace = validate_traceability(paths)
     if not trace.ok:
@@ -121,7 +247,6 @@ def run_development(
 
     from .workspace import policy_path,load_workspace,run_checks
     from .delivery import guard
-    from .agent_guard import guarded_run
     workspace=None
     if policy_path(root).exists():
         workspace=load_workspace(root);guard(root)
@@ -135,6 +260,7 @@ def run_development(
     state.run_status = RunStatus.running
     state.pause_requested = False
     state.stop_requested = False
+    state.tokens_this_run = 0
     state.active_run_id = f"RUN-{uuid.uuid4().hex[:10].upper()}"
     save_project_state(paths, state)
     journal.append("run_started", run_id=state.active_run_id, agent=config.primary_agent.value)
@@ -177,12 +303,35 @@ def run_development(
             _save_features(paths, features)
             journal.append("task_started", feature=feature.id, task=task.id)
 
+            if not task.check_paths:
+                task.check_paths = infer_check_paths(root, task, feature)
+            pack = build_context_pack(paths, task, feature, phase="implement")
+            pack.spec_excerpt = compress_for_prompt(paths, pack.spec_excerpt, label=f"{task.id}-spec")
+            pack.contracts = compress_for_prompt(paths, pack.contracts, label=f"{task.id}-contracts")
+            pack.graph_excerpt = compress_for_prompt(paths, pack.graph_excerpt, label=f"{task.id}-graph")
+            persist_working_set(task, pack)
+            protected = workspace.protected_paths if workspace else []
+            from .agent_guard import (
+                changed_since_hashes,
+                clear_task_baseline,
+                load_task_baseline,
+                persist_task_baseline,
+                snapshot_hashes,
+                workspace_snapshot,
+            )
+            stored_baseline = load_task_baseline(paths, task.id)
+            if already_implemented and stored_baseline:
+                before_hashes = stored_baseline
+            else:
+                before_tree = workspace_snapshot(root)
+                persist_task_baseline(paths, task.id, before_tree)
+                before_hashes = snapshot_hashes(before_tree)
+
             if not already_implemented:
-                result = guarded_run(adapter,
-                    implement_task_prompt(task, feature, root), root, workspace.protected_paths if workspace else [],
-                    writable=True,
-                    mode="agent",
-                    on_event=on_event,
+                prompt = implement_task_prompt(task, feature, root, pack)
+                result = _agent_call(
+                    adapter, prompt, paths=paths, state=state, task_id=task.id, phase="implement",
+                    root=root, protected=protected, writable=True, mode="agent", on_event=on_event,
                 )
                 task.attempts += 1
                 if not result.success:
@@ -204,60 +353,100 @@ def run_development(
             while True:
                 findings = []
                 check_evidence = []
-                for kind, command in [("test", config.test_command), ("lint", config.lint_command), ("typecheck", config.typecheck_command)]:
-                    if command:
-                        try:
-                            vr = _run_check(command, root, task.id, kind)
-                        except subprocess.TimeoutExpired:
-                            vr = VerificationResult(id=f"VER-{uuid.uuid4().hex[:8].upper()}", task_id=task.id,
-                                kind=kind, status="fail", command=command, summary="Check exceeded 300 seconds")
-                        _append_verification(paths, vr)
-                        journal.append("deterministic_check", task=task.id, command=command, status=vr.status)
-                        check_evidence.append(vr.id)
-                        if vr.status == "fail":
-                            findings.append({"summary": f"{kind} failed", "evidence": vr.summary, "repair": "Fix code and rerun checks"})
-                            break
+                for kind, command in commands_for_task(root, config, task):
+                    display = shlex.join(command)
+                    try:
+                        vr = _run_check(command, root, task.id, kind)
+                    except subprocess.TimeoutExpired:
+                        vr = VerificationResult(id=f"VER-{uuid.uuid4().hex[:8].upper()}", task_id=task.id,
+                            kind=kind, status="fail", command=display, summary="Check exceeded 300 seconds")
+                    _append_verification(paths, vr)
+                    journal.append("deterministic_check", task=task.id, command=display, status=vr.status)
+                    check_evidence.append(vr.id)
+                    if vr.status == "fail":
+                        evidence = compress_for_prompt(paths, vr.summary, label=f"{task.id}-{kind}-failure")
+                        findings.append({"summary": f"{kind} failed", "severity": "high", "violates_ac": True, "evidence": evidence, "repair": "Fix code and rerun checks"})
+                        break
                 if workspace and not findings:
                     result=run_checks(root,phase='task')
                     check_evidence.append(result['id'])
                     if not result['passed']:
-                        findings.append({'summary':'Workspace check failed','evidence':result,'repair':'Fix code and rerun checks'})
+                        findings.append({'summary':'Workspace check failed','severity':'high','violates_ac':True,'evidence':compact_output(str(result)),'repair':'Fix code and rerun checks'})
                 if findings:
-                    review_data = {"status": "fail", "findings": findings, "summary": "Deterministic checks failed"}
+                    review_data = apply_review_policy({"status": "fail", "findings": findings, "summary": "Deterministic checks failed"})
                 else:
-                    review = guarded_run(adapter,review_task_prompt(task, feature),root,workspace.protected_paths if workspace else [],writable=False, mode="plan", on_event=on_event)
+                    changed = changed_since_hashes(root, before_hashes)
+                    pack = rebuild_review_pack(paths, task, feature, changed, pack)
+                    persist_working_set(task, pack, extra=changed)
+                    review_prompt = review_task_prompt(
+                        task,
+                        feature,
+                        pack,
+                        independent=bool(config.review_agent and config.review_agent != config.primary_agent),
+                    )
+                    review = _agent_call(
+                        reviewer, review_prompt, paths=paths, state=state, task_id=task.id, phase="review",
+                        root=root, protected=protected, writable=False, mode="plan", on_event=on_event,
+                    )
                     try:
-                        review_data = extract_json(review.text) if review.success else {}
-                        if not isinstance(review_data, dict) or review_data.get("status") not in {"pass", "fail", "warning"}:
-                            raise ValueError("Invalid review schema")
+                        if not review.success:
+                            raise ValueError("Reviewer failed")
+                        def _validate_review(value):
+                            if not isinstance(value, dict) or value.get("status") not in {"pass", "fail", "warning"}:
+                                raise ValueError("Invalid review schema")
+                            return value
+                        review_data = apply_review_policy(parse_structured(review.text, _validate_review))
                     except (ValueError, TypeError):
-                        review_data = {"status": "fail", "findings": [{"summary": "Reviewer returned invalid output"}], "summary": "Invalid review"}
-                    if review_data.get("status") == "pass":
+                        review_data = {"status": "fail", "findings": [{"summary": "Reviewer returned invalid output", "severity": "high"}], "summary": "Invalid review"}
+                    if review_allows_progress(review_data):
                         break
+                if review_allows_progress(review_data):
+                    break
                 if repair_count >= config.max_repair_attempts:
                     break
                 findings = review_data.get("findings", [])
+                task.last_findings = [f for f in findings if isinstance(f, dict)]
+                skill, extra = skills_for_phase("repair", task, root)
+                from .skill_library import role_catalog, roles_for_phase, skill_catalog
+                role, extra_roles = roles_for_phase("repair", extra)
+                pack = pack.model_copy(update={
+                    "skill": skill,
+                    "extra_skills": extra,
+                    "role": role,
+                    "extra_roles": extra_roles,
+                    "skill_descriptions": skill_catalog(skill, *extra, root=root),
+                    "role_descriptions": role_catalog(role, extra_roles),
+                    "last_findings": task.last_findings,
+                })
                 journal.append("review_failed", task=task.id, findings=findings)
                 repair_count += 1
-                journal.append("repair_started", task=task.id, attempt=repair_count)
-                repair = guarded_run(adapter,repair_task_prompt(task, findings),root,workspace.protected_paths if workspace else [],writable=True, mode="agent", on_event=on_event)
+                journal.append("repair_started", task=task.id, attempt=repair_count, skill=skill)
+                repair_prompt = repair_task_prompt(task, findings, pack)
+                repair = _agent_call(
+                    adapter, repair_prompt, paths=paths, state=state, task_id=task.id, phase="repair",
+                    root=root, protected=protected, writable=True, mode="agent", on_event=on_event,
+                )
                 if not repair.success:
                     review_data = {"status": "fail", "summary": "Repair agent failed", "findings": findings}
                     break
                 # Every mutation must pass fresh deterministic checks before review.
 
+            review_status = "pass" if review_allows_progress(review_data) else "fail"
+            if review_data.get("status") == "warning":
+                review_status = "warning"
             review_result = VerificationResult(
                 id=f"VER-{uuid.uuid4().hex[:8].upper()}",
                 task_id=task.id,
                 feature_id=feature.id,
                 kind="review",
-                status="pass" if review_data.get("status") == "pass" else "fail",
+                status=review_status,
                 summary=review_data.get("summary", ""),
-                evidence=[str(f) for f in review_data.get("findings", [])],
+                evidence=[str(f) for f in review_data.get("findings", [])] + [str(f) for f in review_data.get("warnings", [])],
             )
             _append_verification(paths, review_result)
-            if review_result.status != "pass":
+            if not review_allows_progress(review_data):
                 task.status = ItemStatus.failed
+                task.last_findings = [f for f in review_data.get("findings", []) if isinstance(f, dict)]
                 _save_features(paths, features)
                 state.run_status = RunStatus.blocked
                 save_project_state(paths, state)
@@ -268,7 +457,13 @@ def run_development(
             task.evidence.extend([*check_evidence, review_result.id])
             if all(t.status == ItemStatus.verified for t in feature.tasks):
                 feature.status = ItemStatus.verified
+                if not _verify_feature(
+                    root, paths, config, feature, task, workspace, journal, state, features
+                ):
+                    break
             _save_features(paths, features)
+            clear_task_baseline(paths, task.id)
+            refresh_graph(paths)
             journal.append("task_verified", task=task.id, evidence=review_result.id)
             from .recovery import checkpoint
             saved=checkpoint(root)
@@ -311,6 +506,58 @@ def run_development(
     return load_project_state(paths)
 
 
+@single_writer
+def retry_task(root: Path, task_id: str, *, keep_code: bool = True) -> Task:
+    paths = SDDPaths(root)
+    features = load_features(paths)
+    target: Task | None = None
+    parent: Feature | None = None
+    for feature in features:
+        for task in feature.tasks:
+            if task.id == task_id:
+                target, parent = task, feature
+                break
+    if target is None or parent is None:
+        raise RuntimeError(f"Unknown task: {task_id}")
+    target.status = ItemStatus.implemented if keep_code else ItemStatus.pending
+    if not keep_code:
+        target.last_findings = []
+    parent.status = ItemStatus.in_progress
+    _save_features(paths, features)
+    state = load_project_state(paths)
+    if state.run_status in {RunStatus.blocked, RunStatus.failed, RunStatus.paused}:
+        state.run_status = RunStatus.ready
+        state.current_task = target.id
+        state.current_feature = parent.id
+        save_project_state(paths, state)
+    Journal(paths.event_log).append("task_retry_requested", task=task_id, keep_code=keep_code)
+    publish_status(paths)
+    return target
+
+
+@single_writer
+def ask_project(root: Path, question: str) -> str:
+    paths = SDDPaths(root)
+    config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
+    adapter = get_adapter(config.primary_agent, root)
+    from .artifacts import project_context
+    from .compress import compress_for_prompt
+    from .project_graph import graph_context
+    from .prompts import ask_architect_prompt
+    context = compress_for_prompt(
+        paths,
+        project_context(paths) + "\n\n" + graph_context(paths, question),
+        label="ask-context",
+    )
+    result = invoke_agent(adapter, ask_architect_prompt(question, context), root, writable=False, mode="ask")
+    if not result.success:
+        raise RuntimeError(result.text or "Ask agent failed")
+    Journal(paths.event_log).append("project_asked", question=question[:200])
+    return result.text
+
+
 def request_pause(root: Path) -> ProjectState:
     paths = SDDPaths(root)
     state = load_project_state(paths)
@@ -321,14 +568,50 @@ def request_pause(root: Path) -> ProjectState:
     return state
 
 
+_CHANGE_JSON_KEYS = {
+    "classification",
+    "affected_requirements",
+    "affected_features",
+    "affected_tasks",
+    "proposed_changes",
+    "requires_approval",
+}
+
+
+def _change_analysis_json(adapter, paths: SDDPaths, prompt: str) -> dict:
+    """Ask mode returns JSON more reliably than plan mode. Retry once."""
+    current = prompt
+    last = ""
+    for attempt in range(2):
+        result = invoke_agent(adapter, current, paths.root, writable=False, mode="ask")
+        last = result.text or ""
+        if not result.success:
+            raise RuntimeError(last or "Change analysis agent failed")
+        try:
+            data = extract_json(last)
+        except ValueError:
+            paths.runtime.mkdir(parents=True, exist_ok=True)
+            (paths.runtime / "change-analysis.txt").write_text(last, encoding="utf-8")
+            current = (
+                "CRITICAL CONTROLLER RETRY: Your previous reply was not valid JSON. "
+                "Do not explain. Do not use markdown fences. The first character must be '{'. "
+                "Return ONLY the required JSON value.\n\n" + prompt
+            )
+            continue
+        if isinstance(data, dict):
+            return {key: value for key, value in data.items() if key in _CHANGE_JSON_KEYS}
+        break
+    raise RuntimeError("Change analysis did not return JSON. See .sdd/runtime/change-analysis.txt")
+
+
+@single_writer
 def analyze_change(root: Path, description: str) -> ChangeRequest:
     paths = SDDPaths(root)
     config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
-    result = adapter.run(change_analysis_prompt(description, project_context(paths)), writable=False, mode="plan")
-    if not result.success:
-        raise RuntimeError(result.text)
-    data = extract_json(result.text)
+    data = _change_analysis_json(adapter, paths, change_analysis_prompt(description, project_context(paths)))
     cr = ChangeRequest(
         id=f"CR-{uuid.uuid4().hex[:6].upper()}",
         description=description,
@@ -387,16 +670,22 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     old_features = {f.id: f for f in load_features(paths)}
     old_tasks = {t.id: t for f in old_features.values() for t in f.tasks}
 
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
-    result = adapter.run(
+    result = invoke_agent(
+        adapter,
         reconcile_change_prompt(cr.description, cr.classification, str(bundle_data), str(decision_data)),
+        root,
         writable=False,
         mode="plan",
     )
     if not result.success:
         raise RuntimeError(result.text)
     data = extract_json(result.text)
+    from .spec_quality import assert_spec_quality
     bundle = SpecBundle.model_validate(data["bundle"])
+    assert_spec_quality(bundle)
     decisions = [ArchitectureDecision.model_validate(x) for x in data.get("architecture_decisions", decision_data)]
     invalidated = set(data.get("invalidate_tasks", [])) | set(cr.affected_tasks)
     old_bundle = SpecBundle.model_validate(bundle_data)
@@ -406,9 +695,9 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     for feature in bundle.features:
         for task in feature.tasks:
             old = old_tasks.get(task.id)
+            runtime = {"status", "attempts", "evidence", "working_set", "last_findings", "check_paths", "check_command"}
             if feature.id in cr.affected_features or changed_reqs.intersection(task.implements) or (
-                old and old.model_dump(exclude={"status", "attempts", "evidence"}) !=
-                task.model_dump(exclude={"status", "attempts", "evidence"})):
+                old and old.model_dump(exclude=runtime) != task.model_dump(exclude=runtime)):
                 invalidated.add(task.id)
     # Conservative transitive invalidation across task and feature dependencies.
     while True:
@@ -451,12 +740,14 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
         report = validate_traceability(staged)
         if not report.ok:
             raise RuntimeError("Change rejected before mutation: " + "; ".join(report.errors))
-    write_architecture(paths, decisions)
-    write_spec_bundle(paths, bundle, preserve_verification=True)
+    with projection_transaction(paths):
+        write_architecture(paths, decisions)
+        write_spec_bundle(paths, bundle, preserve_verification=True)
     state = load_project_state(paths)
     state.run_status = RunStatus.ready
     state.current_feature = None
     state.current_task = None
+    state.artifacts_generated = True
     save_project_state(paths, state)
     cr.status = "applied"
     dump_yaml(paths.changes / f"{cr.id}.yaml", cr)

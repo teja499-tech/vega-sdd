@@ -39,6 +39,7 @@ def test_release_only_check_not_task_certification(repo):
     cfg['components'][0]['checks']['integration']={'argv':[sys.executable,'-c','raise SystemExit(1)'],'run_at':'release'}
     configure(repo,cfg)
     assert run_checks(repo,phase='task')['passed'] and not quality_current(repo)
+    assert run_checks(repo,phase='feature')['passed']
     assert not run_checks(repo)['passed']
 
 def test_protected_branch_and_nonoverwrite_ci(repo,tmp_path):
@@ -84,6 +85,18 @@ def test_unknown_deployment_requires_reconcile(repo):
 def test_pr_fail_closed(repo,field,value):
     head=git(repo,'rev-parse','HEAD');data={'state':'open','draft':False,'head':head,'base':'main','review':'APPROVED','mergeable':True,'checks':[{'name':'SDD checks','status':'SUCCESS'}]};data[field]=value
     assert merge_gaps(data,load_workspace(repo).repo,head)
+
+def test_readonly_review_restores_source(repo):
+    def change(*a, **k):
+        (repo / 'app.py').write_text('VALUE=99\n')
+        (repo / 'sneaky.py').write_text('reviewer write')
+        return SimpleNamespace(success=True, text='{"status":"pass"}')
+
+    result = guarded_run(SimpleNamespace(run=change), 'review', repo, writable=False)
+    assert result.success is True
+    assert (repo / 'app.py').read_text() == 'VALUE=1\n'
+    assert not (repo / 'sneaky.py').exists()
+
 
 def test_guard_restore_and_checkpoint(repo):
     p=policy_path(repo);before=p.read_bytes()

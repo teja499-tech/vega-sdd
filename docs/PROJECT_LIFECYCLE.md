@@ -1,6 +1,6 @@
-# Project lifecycle, version 0.2.0
+# Project lifecycle
 
-Vega SDD stores specifications, human-readable designs, task history and change/commit links in `.sdd/`. Version 0.2.0 adds approved execution contracts so the same controller can supervise an application, library, command-line tool, data pipeline, infrastructure repository or mixed monorepo without claiming they share a build/deploy mechanism. The local controller is a reference implementation; hosting, toolchain and runtime policies remain project-specific.
+Vega SDD 0.4.0 stores specifications, human-readable designs, task history, evidence, and change/commit links in `.sdd/`. Approved execution contracts let the same controller supervise an application, library, command-line tool, data pipeline, ML or infrastructure repository, mobile/desktop system, documentation project, or mixed monorepo without pretending they share one build/deploy mechanism. Hosting, toolchain, runtime, and application safety remain project-specific.
 
 ## Greenfield and brownfield onboarding
 
@@ -13,7 +13,9 @@ sdd project setup
 # Or review one file and import it:
 sdd project configure --file workspace-policy.yaml
 sdd repo scaffold --owner @your-org/your-team
-git add .
+git status --short
+git add -A
+git status --short
 git commit -m "Approve project baseline"
 sdd repo branch feature-scope
 sdd start
@@ -24,11 +26,11 @@ sdd changelog
 
 For existing code, use `sdd init --project-kind existing`; keep its existing README, CI, security/changelog files and uncommitted work. Inventory the actual build, tests, owners, migrations, dependencies, permissions and release commands first. `repo branch` refuses a dirty source tree and supports `--worktree PATH` for isolation; worktrees share one controller lock. Do not run `init --force` for an ordinary upgrade. Real-agent execution now requires an approved `.sdd/workspace.yaml` and an execution branch; mock demonstrations remain backward compatible.
 
-`project setup` requests component paths, kinds, real commands or explicit waivers, and repository policy. For repeatable setup, review a YAML policy and run `project configure --file`. Approval binds its exact SHA-256. Changing it invalidates approval and verification. The policy is a trusted execution contract, so review scripts and command arguments before approving it. Use `project profiles` for the available 12 kinds: web, service, library, cli, data_pipeline, ml, infrastructure, mobile, desktop, embedded, docs and custom. Components declare `depends_on`; builds/checks run in dependency order. A required check needs an actual command or a substantive, visible waiver.
+`project setup` requests component paths, kinds, real commands or explicit waivers, and repository policy. For repeatable setup, review a YAML policy and run `project configure --file`. Approval binds the policy SHA-256 plus the current cross-provider instruction, role, and skill capability digest. Changing any of them invalidates approval and verification. The policy and capability files are trusted execution contracts, so review scripts, command arguments, roles, vendor instructions/configuration, and project-local skills before approving them. Use `project profiles` for the available 12 kinds: web, service, library, cli, data_pipeline, ml, infrastructure, mobile, desktop, embedded, docs and custom. Components declare `depends_on`; builds/checks run in dependency order. A required check needs an actual command or a substantive, visible waiver.
 
 Commands use argument arrays, per-command timeouts and declared required environment-variable names. Never put secrets in policy argv. Declared variable values are redacted from retained command output, though this is not a general-purpose secret scanner. `run_at: release` marks integration checks that cannot run during early greenfield tasks; full `project check`, CI and release qualification include them. Only a fresh full check of the exact current source and approved policy qualifies PR publication or a release. Generated `.sdd/ci` files are part of source evidence when committed; other controller projections are excluded. Configure project-specific checks for compatibility, performance, security, licenses, SBOM, accessibility, replay, evaluation, hardware and migration as appropriate.
 
-Human documentation remains the v0.1.2 contract: system overview, HLD/LLD, database/API design, security, operations, test plan, contributing and release plan. The existing-system report distinguishes observed behavior, desired changes and unknowns. Inapplicability must be explained rather than filled with fabricated content. `sdd docs check` reports structural gaps, not independent architectural approval. `.sdd/CHANGELOG.md` and spec snapshots/diffs show task/intent changes and explicit commit links; use `sdd link-commit` for accurate attribution.
+Human documentation covers the system overview, HLD/LLD, database/API design, security, operations, test plan, contributing guidance, and release plan. The existing-system report distinguishes observed behavior, desired changes, and unknowns. Inapplicability must be explained rather than filled with fabricated content. `sdd docs check` reports structural gaps, not independent architectural approval. `.sdd/CHANGELOG.md` and spec snapshots/diffs show task/intent changes and explicit commit links; use `sdd link-commit` for accurate attribution.
 
 ## Branch strategy, review and CI
 
@@ -42,7 +44,7 @@ Configure branch protection, required reviewer/code-owner policies, stale-approv
 sdd pipeline export --provider github
 sdd pipeline export --provider gitlab
 sdd pipeline export --provider azure
-sdd pipeline export --provider github --wheel /path/vega_sdd-0.3.1-py3-none-any.whl
+sdd pipeline export --provider github --wheel /path/vega_sdd-0.4.0-py3-none-any.whl
 ```
 
 The exporter writes a frozen-policy standalone Python checker and a GitHub checks workflow, GitLab include fragment or Azure steps template. Existing workflows are preserved. `--update-generated` may replace only files still byte-for-byte equal to the last generated copy. GitHub checks target pull requests, base pushes and merge groups with read-only repository permission. Commit the policy, `.sdd/ci/` and relevant workflow; configure toolchains and dependencies through `setup` commands. The optional GitHub delivery workflow checks and builds once on the integration branch, moves the same artifact to downstream environment jobs, and carries promotion receipts between jobs. Configure actual protected host environments, allowed dispatch users and cloud credentials; exported YAML does not provision them. Default runner is Linux. Check action commit pins/host support before enabling, especially the download-artifact pin, which could not be confirmed through the official commit endpoint in this environment.
@@ -63,7 +65,7 @@ Promotion requires the same version to have succeeded in its predecessor environ
 
 `sdd lifecycle` is a resumable invocation that prepares a branch from a clean baseline, runs tasks, verifies, optionally commits/publishes/merges under policy, and builds/delivers a specified version. Return to it after external review/check completion. For a hosted release the provider must report the actual integration commit; SDD fetches that commit, verifies ancestry and re-tests/builds it in a detached release worktree. The original feature branch is preserved. It is not a background scheduler. For a new independent feature, start a new execution context from the latest base.
 
-`recovery checkpoint` saves canonical state snapshots; verified tasks create checkpoints automatically. `recovery restore ID` validates a checkpoint, preserves application code, pauses state, invalidates task/check evidence and removes stale lifecycle progress. Restore does not undo Git or external deployments. Keep independent backups of the actual repository, artifacts and remote runtime. The controller file guard detects/restores unauthorized agent changes to its state, role/policy instructions and protected paths, and detects Git HEAD/index mutation. This is an accident-detection guard, not an OS sandbox or hostile-agent containment.
+`recovery checkpoint` saves canonical state snapshots; verified tasks create checkpoints automatically. `recovery restore ID` validates a checkpoint, preserves application code, pauses state, invalidates task/check evidence and removes stale lifecycle progress. Restore does not undo Git or external deployments. Keep independent backups of the actual repository, artifacts and remote runtime. Incomplete or corrupt projection transactions fail closed and retain their rollback evidence for inspection. The controller file guard detects/restores unauthorized agent changes to its state, role/policy instructions and protected paths; read-only runs also restore content/modes and Git HEAD, refs, index, config and hooks, including linked-worktree common metadata. Snapshot size bounds fail before agent launch rather than risking unbounded memory. Large monorepo operators can deliberately raise `SDD_GUARD_MAX_FILES`, `SDD_GUARD_MAX_BYTES`, and `SDD_GUARD_MAX_FILE_BYTES` for the controller process after evaluating host memory. This is an accident-detection guard, not an OS sandbox or hostile-agent containment.
 
 For multi-repo portfolios, pass a YAML list `repositories: [{id: app, path: ../app, depends_on: []}]` to `sdd project portfolio-check --file portfolio.yaml`; failed dependencies block dependents. It aggregates local checks, not atomic cross-repository deployment.
 

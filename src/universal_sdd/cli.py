@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import time
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -15,29 +17,31 @@ from rich.table import Table
 
 from . import __version__
 from .adapters import get_adapter
+from .adapters.base import UNRESTRICTED_ENV
 from .artifacts import project_context, write_architecture, write_spec_bundle
-from .json_utils import extract_json
+from .json_utils import extract_json, parse_structured
 from .journal import Journal
 from .models import (
     AgentName,
     ArchitectureDecision,
     ChangeRequest,
     DecisionStatus,
+    PRIMARY_AGENTS,
     ProductModel,
     ProjectKind,
     RunStatus,
     SDDConfig,
     SpecBundle,
 )
-from .orchestrator import analyze_change, apply_change, request_pause, run_development
+from .orchestrator import analyze_change, apply_change, ask_project, invoke_agent, request_pause, retry_task, run_development
 from .prompts import (
     architecture_prompt,
     ask_architect_prompt,
     product_discovery_prompt,
     spec_bundle_prompt,
 )
-from .repository import summarize_repository
-from .scaffold import write_scaffold
+from .repository import materialize_repository_view, summarize_repository
+from .scaffold import refresh_scaffold, write_scaffold
 from .status import metrics, publish_status, render_status
 from .storage import (
     SDDPaths,
@@ -74,7 +78,51 @@ def _event_printer(event) -> None:
         console.print(f"[dim]{event.type}[/dim] {msg}")
 
 
-def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision], yes: bool) -> list[ArchitectureDecision]:
+_JSON_RETRY_PREFIX = (
+    "CRITICAL CONTROLLER RETRY: Your previous reply was not valid JSON. "
+    "Do not explain. Do not use markdown fences. The first character of the "
+    "response must be '{' or '['. Return ONLY the required JSON value.\n\n"
+)
+
+
+def _persist_agent_text(paths: SDDPaths, name: str, text: str) -> None:
+    paths.runtime.mkdir(parents=True, exist_ok=True)
+    (paths.runtime / f"{name}.txt").write_text(text or "", encoding="utf-8")
+
+
+def _require_model(
+    adapter,
+    prompt: str,
+    validate,
+    label: str,
+    paths: SDDPaths,
+    *,
+    invocation_root: Path | None = None,
+):
+    """Run a read-only plan call and parse structured JSON, retrying once."""
+    # Cursor --mode plan is for analysis/proposals and often returns prose.
+    # Structured init payloads use ask (read-only) so the model can emit JSON.
+    agent_root = invocation_root or paths.root
+    result = invoke_agent(adapter, prompt, agent_root, writable=False, mode="ask", on_event=_event_printer)
+    if not result.success:
+        _persist_agent_text(paths, label.replace(" ", "-"), result.text)
+        _fail(result.text or f"{label} agent failed")
+    try:
+        return parse_structured(result.text, validate)
+    except Exception:
+        _persist_agent_text(paths, label.replace(" ", "-"), result.text)
+        console.print(f"[yellow]{label} did not return valid JSON; retrying once.[/yellow]")
+        retry = invoke_agent(adapter, _JSON_RETRY_PREFIX + prompt, agent_root, writable=False, mode="ask", on_event=_event_printer)
+        _persist_agent_text(paths, label.replace(" ", "-") + "-retry", retry.text)
+        if not retry.success:
+            _fail(retry.text or f"{label} retry failed")
+        try:
+            return parse_structured(retry.text, validate)
+        except Exception as exc:
+            _fail(f"Could not parse {label} output: {exc}")
+
+
+def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision], yes: bool, root: Path) -> list[ArchitectureDecision]:
     for d in decisions:
         console.print()
         console.rule(f"{d.id} · {d.category.replace('_', ' ').title()}")
@@ -107,7 +155,7 @@ def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision
             if raw.lower() == "a":
                 q = typer.prompt("Question for architect")
                 ctx = f"PRD:\n{prd}\n\nArchitecture decision:\n{json.dumps(d.model_dump(mode='json'), indent=2)}"
-                ans = adapter.run(ask_architect_prompt(q, ctx), writable=False, mode="plan")
+                ans = invoke_agent(adapter, ask_architect_prompt(q, ctx), root, writable=False, mode="plan")
                 console.print(Panel(ans.text or "No response", title="Architect"))
                 continue
             if raw.lower() == "d":
@@ -144,8 +192,6 @@ def init(
     """Initialize SDD from a PRD through product discovery and an architecture workshop."""
     root = _root(root)
     paths = SDDPaths(root)
-    if paths.config_file.exists() and not force:
-        _fail("SDD is already initialized. Use --force only if you intentionally want to regenerate setup artifacts.")
     prd_path = prd if prd.is_absolute() else root / prd
     if not prd_path.exists():
         _fail(f"PRD not found: {prd_path}")
@@ -153,17 +199,12 @@ def init(
     if not prd_text.strip():
         _fail("PRD is empty.")
 
-    if force and paths.sdd.exists():
-        backup = root / f".sdd-backup-{uuid.uuid4().hex[:8]}"
-        shutil.copytree(paths.sdd, backup)
-        shutil.rmtree(paths.sdd)
-        paths = SDDPaths(root)
     console.print(Panel.fit("Vega SDD · Project Initialization", subtitle=f"v{__version__}"))
     if agent is None:
         if yes:
-            agent = AgentName.codex
+            agent = AgentName.cursor
         else:
-            raw = typer.prompt("Initial coding agent (cursor/codex/claude)", default="codex")
+            raw = typer.prompt("Initial coding agent (cursor/codex/claude/gemini/copilot)", default="cursor")
             try:
                 agent = AgentName(raw.lower())
             except ValueError:
@@ -176,6 +217,17 @@ def init(
             raw = typer.prompt("Project type (new/existing)", default="existing" if has_code else "new")
             project_kind = ProjectKind(raw.lower())
 
+    if paths.config_file.exists() and not force:
+        existing = load_project_state(paths)
+        if existing.initialized:
+            _fail("SDD is already initialized. Use --force only if you intentionally want to regenerate setup artifacts.")
+
+    if force and paths.sdd.exists() and load_project_state(paths).initialized:
+        backup = root / f".sdd-backup-{uuid.uuid4().hex[:8]}"
+        shutil.copytree(paths.sdd, backup)
+        shutil.rmtree(paths.sdd)
+        paths = SDDPaths(root)
+
     write_scaffold(root)
     config = SDDConfig(
         project_name=root.name,
@@ -185,88 +237,158 @@ def init(
     )
     save_config(paths, config)
     state = load_project_state(paths)
-    state.initialized = True
+    state.initialized = False
+    state.run_status = RunStatus.initializing
     save_project_state(paths, state)
 
-    adapter = get_adapter(agent, root)
-    caps = adapter.capabilities()
-    if not caps.installed:
-        _fail(f"{agent.value} CLI is not installed or not on PATH. Scaffold/config were created; install the agent and rerun `sdd init --force`.")
-    console.print(f"Agent: [bold]{agent.value}[/bold] ({caps.version or 'version unknown'})")
+    def _fail_init(message: str, code: int = 1) -> None:
+        failed = load_project_state(paths)
+        failed.initialized = False
+        failed.run_status = RunStatus.failed
+        save_project_state(paths, failed)
+        _fail(message, code)
 
-    repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
-    console.print("\n[bold]1/4 Product discovery[/bold]")
-    discovery_result = adapter.run(product_discovery_prompt(prd_text, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not discovery_result.success:
-        _fail(discovery_result.text or "Product discovery agent failed")
+    finished = False
+    init_workspace = tempfile.TemporaryDirectory(prefix="vega-sdd-init-")
+    invocation_root = Path(init_workspace.name)
     try:
-        product = ProductModel.model_validate(extract_json(discovery_result.text))
-    except Exception as exc:
-        _fail(f"Could not parse product discovery output: {exc}")
+        # Initialization runs outside the target repository so pre-existing agent
+        # rules and project-local skills cannot execute before the user approves
+        # their capability hash during `sdd project setup`.
+        write_scaffold(invocation_root, force=True)
+        (invocation_root / "PRD.md").write_text(prd_text, encoding="utf-8")
+        source_view_note = ""
+        if project_kind == ProjectKind.existing:
+            source_view_note = materialize_repository_view(root, invocation_root)
+        adapter = get_adapter(agent, invocation_root)
+        caps = adapter.capabilities()
+        if not caps.installed:
+            _fail_init(f"{agent.value} CLI is not installed or not on PATH. Scaffold/config were created; install the agent and rerun `sdd init`.")
+        console.print(f"Agent: [bold]{agent.value}[/bold] ({caps.version or 'version unknown'})")
 
-    clarifications: list[str] = []
-    if product.open_questions:
-        console.print(f"Found {len(product.open_questions)} material clarification question(s).")
-        for i, question in enumerate(product.open_questions, 1):
-            if yes:
-                clarifications.append(f"Q{i}: {question}\nA{i}: Deferred")
-            else:
-                answer = typer.prompt(question, default="defer")
-                clarifications.append(f"Q{i}: {question}\nA{i}: {answer}")
-        (paths.product / "clarifications.md").write_text("# PRD Clarifications\n\n" + "\n\n".join(clarifications) + "\n", encoding="utf-8")
-    augmented_prd = prd_text + ("\n\n# SDD Clarifications\n" + "\n\n".join(clarifications) if clarifications else "")
+        repo_summary = summarize_repository(root) if project_kind == ProjectKind.existing else ""
+        if source_view_note:
+            repo_summary = source_view_note + "\n" + repo_summary
+        console.print("\n[bold]1/4 Product discovery[/bold]")
+        product = _require_model(
+            adapter,
+            product_discovery_prompt(prd_text, repo_summary),
+            ProductModel.model_validate,
+            "product discovery",
+            paths,
+            invocation_root=invocation_root,
+        )
 
-    console.print("\n[bold]2/4 Architecture workshop[/bold]")
-    arch_result = adapter.run(architecture_prompt(augmented_prd, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not arch_result.success:
-        _fail(arch_result.text or "Architecture analysis failed")
-    try:
-        raw_decisions = extract_json(arch_result.text)
-        decisions = [ArchitectureDecision.model_validate(x) for x in raw_decisions]
-    except Exception as exc:
-        _fail(f"Could not parse architecture output: {exc}")
-    decisions = _select_architecture(adapter, augmented_prd, decisions, yes)
-    write_architecture(paths, decisions)
+        from .clarifications import record_architecture_decisions, record_product_questions
+        answers: list[tuple[str, str]] = []
+        if product.open_questions:
+            console.print(f"Found {len(product.open_questions)} material clarification question(s).")
+            for question in product.open_questions:
+                if yes:
+                    answers.append((question, "Deferred"))
+                else:
+                    answers.append((question, typer.prompt(question, default="defer")))
+            record_product_questions(paths, product, answers)
+        clarifications = [f"{qid}: {q}\nA: {a}" for qid, (q, a) in ((f"Q{i}", pair) for i, pair in enumerate(answers, 1))]
+        augmented_prd = prd_text + ("\n\n# SDD Clarifications\n" + "\n\n".join(clarifications) if clarifications else "")
 
-    deferred = [d for d in decisions if d.status == DecisionStatus.deferred]
-    if deferred:
-        console.print(f"[yellow]{len(deferred)} architecture decision(s) remain deferred. Specs will record them as unresolved.[/yellow]")
+        console.print("\n[bold]2/4 Architecture workshop[/bold]")
+        def _validate_decisions(raw):
+            if not isinstance(raw, list):
+                raise ValueError("Architecture output must be a JSON array")
+            return [ArchitectureDecision.model_validate(x) for x in raw]
+        decisions = _require_model(
+            adapter,
+            architecture_prompt(augmented_prd, repo_summary),
+            _validate_decisions,
+            "architecture",
+            paths,
+            invocation_root=invocation_root,
+        )
+        decisions = _select_architecture(adapter, augmented_prd, decisions, yes, invocation_root)
+        write_architecture(paths, decisions)
+        record_architecture_decisions(paths, decisions)
 
-    console.print("\n[bold]3/4 Specification generation[/bold]")
-    spec_result = adapter.run(spec_bundle_prompt(augmented_prd, decisions, repo_summary), writable=False, mode="plan", on_event=_event_printer)
-    if not spec_result.success:
-        _fail(spec_result.text or "Specification generation failed")
-    try:
-        bundle = SpecBundle.model_validate(extract_json(spec_result.text))
-    except Exception as exc:
-        _fail(f"Could not parse specification bundle: {exc}")
-    write_spec_bundle(paths, bundle)
+        deferred = [d for d in decisions if d.status == DecisionStatus.deferred]
+        if deferred:
+            console.print(f"[yellow]{len(deferred)} architecture decision(s) remain deferred. Specs will record them as unresolved.[/yellow]")
 
-    report = validate_traceability(paths)
-    if not report.ok:
-        state = load_project_state(paths)
-        state.run_status = RunStatus.blocked
-        save_project_state(paths, state)
-        console.print("[red]Traceability validation failed.[/red]")
-        for e in report.errors:
-            console.print(f"  • {e}")
-        raise typer.Exit(2)
-    publish_status(paths)
-    Journal(paths.event_log).append("project_initialized", agent=agent.value, requirements=len(bundle.requirements), features=len(bundle.features))
+        console.print("\n[bold]3/4 Specification generation[/bold]")
+        bundle = _require_model(
+            adapter,
+            spec_bundle_prompt(augmented_prd, decisions, repo_summary, skill_root=invocation_root),
+            SpecBundle.model_validate,
+            "specification bundle",
+            paths,
+            invocation_root=invocation_root,
+        )
+        try:
+            write_spec_bundle(paths, bundle)
+        except ValueError as exc:
+            _fail_init(str(exc), 2)
+        from .clarifications import merge_open_questions
+        merge_open_questions(paths, bundle.product.open_questions)
 
-    from .documentation import check_docs
-    doc_gaps = check_docs(paths)
-    console.print(f"Human docs: .sdd/docs/README.md ({len(doc_gaps)} documentation gap(s); run sdd docs check)")
-    console.print("\n[bold]4/4 Readiness review[/bold]")
-    console.print(f"✓ Requirements: {len(bundle.requirements)}")
-    console.print(f"✓ Features: {len(bundle.features)}")
-    console.print(f"✓ Architecture decisions: {len(decisions)}")
-    console.print(f"✓ Traceability: valid ({len(report.warnings)} warning(s))")
-    if bundle.product.open_questions or deferred:
-        console.print("[yellow]Project contains unresolved questions/decisions. Review before autonomous development.[/yellow]")
-    else:
-        console.print("[green]Project is ready for implementation.[/green]")
-    console.print("Next: [bold]sdd start[/bold]  |  inspect: [bold]sdd status[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold]")
+        report = validate_traceability(paths)
+        if not report.ok:
+            console.print("[red]Traceability validation failed.[/red]")
+            for e in report.errors:
+                console.print(f"  • {e}")
+            _fail_init("Traceability validation failed.", 2)
+        Journal(paths.event_log).append("project_initialized", agent=agent.value, requirements=len(bundle.requirements), features=len(bundle.features))
+        ready = load_project_state(paths)
+        ready.initialized = True
+        ready.run_status = RunStatus.ready
+        ready.artifacts_generated = True
+        save_project_state(paths, ready)
+        publish_status(paths)
+        finished = True
+
+        from .documentation import check_docs
+        doc_gaps = check_docs(paths)
+        console.print(f"Human docs: .sdd/docs/README.md ({len(doc_gaps)} documentation gap(s); run sdd docs check)")
+        console.print("\n[bold]4/4 Readiness review[/bold]")
+        console.print(f"✓ Requirements: {len(bundle.requirements)}")
+        console.print(f"✓ Features: {len(bundle.features)}")
+        console.print(f"✓ Architecture decisions: {len(decisions)}")
+        console.print(f"✓ Traceability: valid ({len(report.warnings)} warning(s))")
+        if bundle.product.open_questions or deferred:
+            console.print("[yellow]Project contains unresolved questions/decisions. Review before autonomous development.[/yellow]")
+        else:
+            console.print("[green]Project is ready for implementation.[/green]")
+        console.print("Inspect: [bold]sdd status[/bold], [bold]sdd requirements[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold], [bold]sdd verify[/bold]")
+        if agent == AgentName.mock:
+            console.print("Next: [bold]sdd start[/bold] (the mock exercises lifecycle only; it does not build application code)")
+        else:
+            console.print(
+                "Next: [bold]sdd project setup[/bold], review/commit the generated baseline, "
+                "then [bold]sdd repo branch <scope>[/bold] and [bold]sdd start --max-tasks 1[/bold]."
+            )
+    finally:
+        init_workspace.cleanup()
+        if not finished:
+            failed = load_project_state(paths)
+            failed.initialized = False
+            failed.run_status = RunStatus.failed
+            save_project_state(paths, failed)
+
+
+@app.command("scaffold")
+@single_writer
+def scaffold_cmd(
+    root: Path = typer.Option(Path("."), "--root"),
+    force: bool = typer.Option(False, "--force", help="Overwrite customized skills and roles, not only stubs."),
+) -> None:
+    """Refresh roles, skills, and IDE commands in an existing project. Does not rewrite specs."""
+    report = refresh_scaffold(_root(root), refresh=True, force=force)
+    for action, rows in report.items():
+        if not rows:
+            continue
+        console.print(f"[bold]{action}[/bold] ({len(rows)})")
+        for rel in rows:
+            console.print(f"  {rel}")
+    if not any(report.values()):
+        console.print("Scaffold already current.")
 
 
 @app.command()
@@ -278,7 +400,7 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
     table.add_column("Installed")
     table.add_column("Version")
     table.add_column("Capabilities")
-    for name in [AgentName.cursor, AgentName.codex, AgentName.claude]:
+    for name in PRIMARY_AGENTS:
         caps = get_adapter(name, root).capabilities()
         features = ", ".join(k for k, v in {
             "stream": caps.streaming, "resume": caps.resume, "interrupt": caps.interrupt, "structured": caps.structured_output
@@ -287,9 +409,37 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
     console.print(table)
     paths = SDDPaths(root)
     if paths.config_file.exists():
+        from .clarifications import unresolved_material
         cfg = load_config(paths)
+        state = load_project_state(paths)
         console.print(f"Configured primary agent: [bold]{cfg.primary_agent.value}[/bold]")
-        console.print(f"SDD state: {load_project_state(paths).run_status.value}")
+        console.print(f"SDD state: {state.run_status.value}")
+        if not cfg.test_command and cfg.primary_agent != AgentName.mock and not (root / ".sdd/workspace.yaml").exists():
+            console.print("[yellow]Missing test_command and workspace policy. Run `sdd project setup`.[/yellow]")
+        if not (root / ".sdd/workspace.yaml").exists() and cfg.primary_agent != AgentName.mock:
+            console.print("[yellow]No approved workspace policy. Real-agent runs require `sdd project setup`.[/yellow]")
+        open_qs = unresolved_material(paths)
+        if open_qs:
+            console.print(f"[yellow]{len(open_qs)} unresolved clarification(s). Run `sdd clarify` or start with --accept-deferred.[/yellow]")
+        if shutil.which("docker") is None:
+            console.print("[dim]docker not on PATH (optional; needed for compose-based projects).[/dim]")
+        console.print(f"Graphify: {'installed' if shutil.which('graphify') else 'missing — sdd graph refresh needs the Graphify CLI'}")
+        try:
+            import headroom  # noqa: F401
+            headroom_state = "installed"
+        except ImportError:
+            headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
+        console.print(f"Headroom: {headroom_state}")
+        if cfg.review_agent:
+            console.print(f"Review agent: [bold]{cfg.review_agent.value}[/bold]")
+        else:
+            console.print("Review agent: same as primary (isolated self-review, not an independent model)")
+        if not cfg.enable_headroom:
+            console.print("Headroom compression: disabled in config")
+        if cfg.allow_unrestricted_agent:
+            console.print("[yellow]allow_unrestricted_agent is on: writable agents receive vendor auto-approve flags. Keep the run isolated.[/yellow]")
+        else:
+            console.print("Unrestricted agent flags: off (set allow_unrestricted_agent or pass --allow-unrestricted on start)")
     else:
         console.print("SDD not initialized in this directory.")
 
@@ -299,7 +449,7 @@ def agent_list(root: Path = typer.Option(Path("."), "--root")) -> None:
     root = _root(root)
     paths = SDDPaths(root)
     current = load_config(paths).primary_agent if paths.config_file.exists() else None
-    for name in [AgentName.cursor, AgentName.codex, AgentName.claude]:
+    for name in PRIMARY_AGENTS:
         caps = get_adapter(name, root).capabilities()
         marker = "*" if current == name else " "
         console.print(f"{marker} {name.value:8} {'installed' if caps.installed else 'missing':9} {caps.version or ''}")
@@ -341,6 +491,10 @@ def status(root: Path = typer.Option(Path("."), "--root")) -> None:
     table.add_row("Requirements verified", f"{m.requirements_verified}/{m.requirements_total}")
     table.add_row("Tasks verified", f"{m.tasks_verified}/{m.tasks_total}")
     table.add_row("Current", f"{state.current_feature or '-'} / {state.current_task or '-'}")
+    from .tokens import savings_summary
+    saved = savings_summary(paths)
+    if saved["events"]:
+        table.add_row("Context saved", f"{saved['saved_chars']} chars / {saved['events']} packs")
     console.print(table)
     console.print(f"Status file: {paths.status_file.relative_to(paths.root)}")
 
@@ -366,12 +520,17 @@ def watch(
 def start(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1, help="Pause after N verified tasks."),
+    accept_deferred: bool = typer.Option(False, "--accept-deferred", help="Sign deferred clarifications as accepted defaults."),
+    allow_unrestricted: bool = typer.Option(False, "--allow-unrestricted", help="Opt in to vendor auto-approve flags for this run only."),
 ) -> None:
     """Run autonomous task implementation/review/repair in the foreground."""
     root = _root(root)
+    if allow_unrestricted:
+        os.environ[UNRESTRICTED_ENV] = "1"
+        console.print("[yellow]Unrestricted agent flags enabled for this process. Isolate the workspace.[/yellow]")
     console.print("Starting SDD development. Ctrl+C requests a safe pause.")
     try:
-        state = run_development(root, max_tasks=max_tasks, on_event=_event_printer)
+        state = run_development(root, max_tasks=max_tasks, on_event=_event_printer, accept_deferred=accept_deferred)
     except RuntimeError as exc:
         _fail(str(exc), 2)
     console.print(f"Run ended with state: [bold]{state.run_status.value}[/bold]")
@@ -384,10 +543,12 @@ def start(
 def resume(
     root: Path = typer.Option(Path("."), "--root"),
     max_tasks: Optional[int] = typer.Option(None, "--max-tasks", min=1),
+    accept_deferred: bool = typer.Option(False, "--accept-deferred"),
+    allow_unrestricted: bool = typer.Option(False, "--allow-unrestricted"),
 ) -> None:
     """Resume from durable repository state; no prior chat context is required."""
     root = _root(root)
-    start(root=root, max_tasks=max_tasks)
+    start(root=root, max_tasks=max_tasks, accept_deferred=accept_deferred, allow_unrestricted=allow_unrestricted)
 
 
 @app.command()
@@ -414,13 +575,23 @@ def verify(root: Path = typer.Option(Path("."), "--root")) -> None:
         raise typer.Exit(2)
 
 
+@single_writer
+def _intervention_answer(root: Path, question: str) -> str:
+    paths = SDDPaths(root)
+    config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
+    adapter = get_adapter(config.primary_agent, root)
+    result = invoke_agent(adapter, ask_architect_prompt(question, project_context(paths)), root, writable=False, mode="plan")
+    if not result.success:
+        raise RuntimeError(result.text or "Architect intervention failed")
+    return result.text
+
+
 @app.command()
 def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
     """Open an interactive architect conversation grounded in current repo state."""
     root = _root(root)
-    paths = SDDPaths(root)
-    config = load_config(paths)
-    adapter = get_adapter(config.primary_agent, root)
     console.print("Architect intervention session. Type `exit` to leave, `change: ...` to analyze a correction/change.")
     while True:
         try:
@@ -436,8 +607,12 @@ def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
             if cr.requires_approval:
                 console.print("Run `sdd change \"...\"` to explicitly approve/apply it.")
             continue
-        result = adapter.run(ask_architect_prompt(question, project_context(paths)), writable=False, mode="plan")
-        console.print(Panel(result.text or "No response", title="Architect"))
+        try:
+            answer = _intervention_answer(root, question)
+        except RuntimeError as exc:
+            console.print(f"[red]Error:[/red] {exc}")
+            continue
+        console.print(Panel(answer or "No response", title="Architect"))
 
 
 def _print_change(cr: ChangeRequest) -> None:
@@ -445,11 +620,13 @@ def _print_change(cr: ChangeRequest) -> None:
         f"Classification: [bold]{cr.classification}[/bold]\n"
         f"Affected requirements: {', '.join(cr.affected_requirements) or '-'}\n"
         f"Affected features: {', '.join(cr.affected_features) or '-'}\n"
-        f"Affected tasks: {', '.join(cr.affected_tasks) or '-'}\n"
+        f"Tasks that will be invalidated: {', '.join(cr.affected_tasks) or '-'}\n"
         f"Approval required: {'yes' if cr.requires_approval else 'no'}\n"
         f"Proposed: {'; '.join(cr.proposed_changes) or '-'}",
         title=cr.id,
     ))
+    if cr.affected_tasks:
+        console.print("[yellow]Resume will re-run only the invalidated tasks and their dependents.[/yellow]")
 
 
 @app.command()
@@ -460,16 +637,19 @@ def change(
 ) -> None:
     """Analyze a problem, classify it, and safely repair or reconcile affected specs."""
     root = _root(root)
-    cr = analyze_change(root, description)
+    try:
+        cr = analyze_change(root, description)
+    except (RuntimeError, ValueError) as exc:
+        _fail(str(exc), 2)
     _print_change(cr)
     if cr.requires_approval and not approve:
         approve = typer.confirm("This changes approved requirements/specs/architecture. Approve?", default=False)
     if cr.requires_approval and not approve:
         console.print(f"Change recorded as proposed: .sdd/changes/{cr.id}.yaml")
+        console.print("Re-run with --approve after reviewing the invalidated-task preview.")
         return
     cr.approved = True
     cr.status = "approved"
-    dump_yaml(SDDPaths(root).changes / f"{cr.id}.yaml", cr)
     try:
         applied = apply_change(root, cr)
     except RuntimeError as exc:
@@ -519,6 +699,101 @@ def feature(
     console.print(Panel(text, title=feature_id))
 
 
+graph_app = typer.Typer(help="Refresh and query the Graphify knowledge graph.")
+app.add_typer(graph_app, name="graph")
+
+
+@graph_app.command("refresh")
+@single_writer
+def graph_refresh(root: Path = typer.Option(Path("."), "--root")) -> None:
+    """Write the traceability corpus and run graphify (or graphify update)."""
+    from .graphify_index import refresh_knowledge_graph
+    result = refresh_knowledge_graph(SDDPaths(_root(root)))
+    console.print(f"Corpus: {result.get('corpus')}")
+    if not result.get("installed"):
+        console.print("[yellow]graphify CLI is not installed. Corpus was written; the knowledge graph was not built.[/yellow]")
+        return
+    console.print(result.get("command") or "graphify")
+    if result.get("exit_code"):
+        console.print(result.get("output") or "graphify failed")
+        raise typer.Exit(2)
+    console.print(f"Graph: {result.get('graph') or 'graphify-out/graph.json'}")
+
+
+@graph_app.command("query")
+def graph_query(
+    question: str = typer.Argument(...),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Return a scoped Graphify subgraph for a question."""
+    from .graphify_index import query_knowledge_graph
+    text = query_knowledge_graph(_root(root), question)
+    if not text:
+        _fail("No Graphify subgraph. Install graphify and run `sdd graph refresh`.")
+    console.print(text)
+
+
+@app.command()
+def ask(
+    question: str = typer.Argument(..., help="Project question grounded in specs, ADRs, and the project graph."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Read-only project copilot. Does not mutate the plan."""
+    try:
+        answer = ask_project(_root(root), question)
+    except RuntimeError as exc:
+        _fail(str(exc), 2)
+    console.print(Panel(answer or "No response", title="Project copilot"))
+
+
+@app.command()
+@single_writer
+def clarify(
+    clarification_id: Optional[str] = typer.Argument(None, help="Clarification id such as Q1 or ARCH-001."),
+    answer: Optional[str] = typer.Option(None, "--answer", help="Answer to record."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Resolve material questions that block `sdd start`."""
+    from .clarifications import answer_clarification, load_clarifications, unresolved_material
+    paths = SDDPaths(_root(root))
+    if not clarification_id:
+        items = unresolved_material(paths) or load_clarifications(paths)
+        if not items:
+            console.print("No clarifications recorded.")
+            return
+        for item in items:
+            console.print(f"[bold]{item.id}[/bold] ({item.status}) {item.question}")
+            if item.answer:
+                console.print(f"  {item.answer}")
+        return
+    if not answer:
+        answer = typer.prompt("Answer")
+    try:
+        item = answer_clarification(paths, clarification_id, answer)
+    except ValueError as exc:
+        _fail(str(exc))
+    console.print(f"[green]{item.id} answered.[/green]")
+
+
+task_app = typer.Typer(help="Inspect or recover individual SDD tasks.")
+app.add_typer(task_app, name="task")
+
+
+@task_app.command("retry")
+def task_retry(
+    task_id: str,
+    keep_code: bool = typer.Option(True, "--keep-code/--wipe-status", help="Keep working-tree code and re-verify."),
+    root: Path = typer.Option(Path("."), "--root"),
+) -> None:
+    """Re-queue a failed task without wiping uncommitted implementation."""
+    try:
+        task = retry_task(_root(root), task_id, keep_code=keep_code)
+    except RuntimeError as exc:
+        _fail(str(exc), 2)
+    mode = "implemented (keep code, re-verify)" if keep_code else "pending (re-implement)"
+    console.print(f"{task.id} queued as {mode}. Run `sdd resume`.")
+
+
 @app.command("log")
 def log_cmd(
     root: Path = typer.Option(Path("."), "--root"),
@@ -550,6 +825,8 @@ def docs_refresh(root: Path = typer.Option(Path("."), "--root"), enrich: bool = 
         from .models import DesignDocument
         from .history import snapshot_specs
         config = load_config(paths)
+        from .workspace import require_approved_capabilities
+        require_approved_capabilities(paths.root, config.primary_agent)
         bundle = SpecBundle.model_validate(load_yaml(paths.spec_bundle_file))
         prompt = (
             "You are a technical writer working read-only. Marker: HUMAN_DESIGN_DOCUMENTS_JSON\n"
@@ -566,7 +843,7 @@ def docs_refresh(root: Path = typer.Option(Path("."), "--root"), enrich: bool = 
             + "\nApproved ADRs: " + json.dumps(load_yaml(paths.architecture_decisions_file, []))
             + "\nRepository inventory (not proof of behavior): " + summarize_repository(paths.root)
         )
-        result = get_adapter(config.primary_agent, paths.root).run(prompt, writable=False, mode="plan", on_event=_event_printer)
+        result = invoke_agent(get_adapter(config.primary_agent, paths.root), prompt, paths.root, writable=False, mode="plan", on_event=_event_printer)
         if not result.success:
             _fail(result.text or "Documentation agent failed; canonical documents unchanged")
         try:

@@ -126,16 +126,20 @@ def render_docs(paths: SDDPaths) -> list[str]:
             rows.append(f'| {req.id} | Unmapped | Unmapped | Unverified | None |')
     rows += ['', '[Human change history and commit links](../CHANGELOG.md)', '']
     write('TRACEABILITY.md', '\n'.join(rows))
+    write('DEVELOPER_GUIDE.md', _developer_guide(bundle, kind, fingerprint))
     findings = issues(bundle, kind)
     index = ['# Project Documentation', '', intro, '## Reading order', '']
     index += [f'- [{key.replace("_", " ").title()}]({key}.md)' for key in CONTRACT]
-    index += ['- [Traceability](TRACEABILITY.md)', '- [Human changelog](../CHANGELOG.md)', '- [Live status](../STATUS.md)', '', '## Documentation gaps', '']
+    index += ['- [Developer guide](DEVELOPER_GUIDE.md)', '- [Traceability](TRACEABILITY.md)', '- [Human changelog](../CHANGELOG.md)', '- [Live status](../STATUS.md)', '', '## Documentation gaps', '']
     index += [f'- {x}' for x in findings] or ['No structural gaps detected. Semantic review and operational validation remain required.']
     write('README.md', '\n'.join(index) + '\n')
     dump_yaml(manifest_path, {'source_digest': fingerprint, 'files': {**hashes, **generated}, 'conflicts': conflicts, 'gaps': findings})
     # Add discoverable entry points without replacing any enterprise-owned file.
+    readme = paths.root / 'README.md'
+    if not readme.exists():
+        atomic_write(readme, _root_readme(bundle))
     entrypoints = {
-        'SDD_PROJECT.md': '# Project engineering guide\n\nStart with [human project documentation](.sdd/docs/README.md), then [live status](.sdd/STATUS.md) and [change history](.sdd/CHANGELOG.md).\n\nGenerated documents distinguish planned design from observed implementation. Run `sdd docs check` to inspect gaps.\n',
+        'SDD_PROJECT.md': _root_readme(bundle),
         'CHANGELOG.md': '# Changelog\n\n[SDD task, specification and commit history](.sdd/CHANGELOG.md). Release tagging and release approval remain separate activities.\n',
         'CONTRIBUTING.md': '# Contributing\n\nSee [project contribution guidance](.sdd/docs/CONTRIBUTING.md), [traceability](.sdd/docs/TRACEABILITY.md) and AGENTS.md. Use `sdd change` for intent changes. Include `SDD-Task: <task-id>` as a Git commit trailer on authorized task commits.\n',
         'SECURITY.md': '# Security\n\nSee [security design](.sdd/docs/SECURITY.md). Private vulnerability reporting contact and response ownership are not configured by SDD; project owners must provide them before public release. Do not publish secrets in issues.\n',
@@ -156,10 +160,75 @@ def check_docs(paths: SDDPaths) -> list[str]:
     if manifest.get('source_digest') != source_digest(paths):
         findings.append('Documentation source revision is stale; run sdd docs refresh')
     findings.extend(manifest.get('conflicts', []))
-    for name in [k + '.md' for k in CONTRACT] + ['README.md', 'TRACEABILITY.md']:
+    for name in [k + '.md' for k in CONTRACT] + ['README.md', 'TRACEABILITY.md', 'DEVELOPER_GUIDE.md']:
         path = paths.sdd / 'docs' / name
         if not path.exists():
             findings.append(f'{name}: file missing')
         elif digest(path.read_text()) != manifest.get('files', {}).get(name):
             findings.append(f'{name}: manual modification detected')
+    findings.extend(_readme_quality(paths, bundle))
+    return findings
+
+
+def _root_readme(bundle: SpecBundle) -> str:
+    return (
+        f"# {bundle.product.name}\n\n{bundle.product.summary}\n\n"
+        "## Prerequisites\n\n"
+        "- Runtime recorded in `.sdd/architecture/` and the repository manifests\n"
+        "- Docker Compose only when the repository includes a compose file\n"
+        "- Copy `.env.example` to `.env` when that file exists; do not invent providers\n\n"
+        "## Local setup\n\n"
+        "1. Install dependencies from the repository manifest.\n"
+        "2. Copy `.env.example` to `.env` and fill required values.\n"
+        "3. Run migrations if the project defines them.\n"
+        "4. `docker compose up` when a compose file exists.\n\n"
+        "## Tests\n\n"
+        "Run `test_command` from `.sdd/config.yaml` or `sdd project check`.\n\n"
+        "## Run\n\n"
+        "Start the service using the OPERATIONS design or compose file. "
+        "Ask the project copilot with `sdd ask \"how do I run this locally?\"`.\n\n"
+        "## Documentation\n\n"
+        "- [Developer guide](.sdd/docs/DEVELOPER_GUIDE.md)\n"
+        "- [Human docs](.sdd/docs/README.md)\n"
+        "- [Live status](.sdd/STATUS.md)\n"
+    )
+
+
+def _developer_guide(bundle: SpecBundle, kind: str, fingerprint: str) -> str:
+    contributing = bundle.design_documents.get("CONTRIBUTING")
+    ops = bundle.design_documents.get("OPERATIONS")
+    body = [
+        f"# Developer guide\n",
+        f"Source revision: `{fingerprint}`\n",
+        f"Project kind: {kind}\n",
+        f"## What this system is\n\n{bundle.product.summary}\n",
+        "## Local setup\n\nCopy `.env.example` if present. Install dependencies from the repository manifest. "
+        "Run compose only when a compose file exists. Record model or hosted-provider commands in OPERATIONS "
+        "or an ADR before adding them here.\n",
+        "## Tests\n\n" + "\n".join(f"- {item}" for item in bundle.test_strategy or ["Record a test command in `.sdd/config.yaml`."]) + "\n",
+        "## Workflow\n\nUse `sdd start` for implementation, `sdd ask` for questions, and `sdd change` for ad-hoc plan changes.\n",
+    ]
+    if contributing and contributing.status != "not_applicable":
+        body.append("## Contribution notes\n\n" + contributing.summary + "\n")
+    if ops and ops.status != "not_applicable":
+        body.append("## Operations pointers\n\n" + ops.summary + "\n")
+    return "\n".join(body)
+
+
+def _readme_quality(paths: SDDPaths, bundle: SpecBundle) -> list[str]:
+    findings: list[str] = []
+    readme = paths.root / "README.md"
+    if not readme.exists():
+        findings.append("README.md: project-root README missing")
+        return findings
+    text = readme.read_text(encoding="utf-8")
+    lowered = text.lower()
+    if len(text.strip()) < 200:
+        findings.append("README.md: developer guide is too thin")
+    if not any(token in lowered for token in ("setup", "install", "compose", "prerequisite")):
+        findings.append("README.md: missing local setup instructions")
+    if "test" not in lowered:
+        findings.append("README.md: missing test instructions")
+    if bundle.product.name and bundle.product.name.lower() not in lowered and "sdd" not in lowered:
+        findings.append("README.md: does not identify the project")
     return findings

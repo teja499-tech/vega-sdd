@@ -92,6 +92,11 @@ def render_status(paths: SDDPaths) -> str:
         "",
         "## Features",
     ]
+    from .tokens import savings_summary
+    saved = savings_summary(paths)
+    if saved["events"]:
+        lines.insert(-1, f"- Context compression saved: **{saved['saved_chars']}** characters across {saved['events']} packs")
+        lines.insert(-1, "")
     for feature in features:
         total = len(feature.tasks)
         done = sum(1 for t in feature.tasks if t.status == ItemStatus.verified)

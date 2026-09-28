@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .skill_library import ROLE_FILES, SKILLS
 from .storage import SDDPaths
 
 AGENTS_MD = """<!-- UNIVERSAL_SDD_START -->
@@ -25,73 +26,109 @@ This repository uses Spec Driven Development (SDD).
 6. If implementation exposes a requirement or architecture ambiguity, surface it as a blocker/escalation.
 7. Do not weaken tests to make a failing implementation pass.
 8. Significant architecture changes require an ADR and explicit user approval.
-9. Prefer repository skills for established workflows.
+9. Prefer repository skills for established workflows. Load only the skill named in the controller context pack.
 10. Leave the repository in a recoverable state.
+11. Ask project questions with `sdd ask`. Mutate the plan with `sdd change`. Do not invent product rules.
 <!-- UNIVERSAL_SDD_END -->
 """
 
-ROLE_FILES = {
-    "architect.md": """# Architect\nProtect product intent and architecture. Classify concerns before changing specs. Requirement and architecture changes need user approval.\n""",
-    "developer.md": """# Developer\nImplement one bounded SDD task at a time. Do not mutate approved product intent. Add deterministic verification.\n""",
-    "qa-engineer.md": """# QA Engineer\nIndependently verify acceptance criteria, negative paths, regressions, and evidence. Never rely solely on developer claims.\n""",
-    "security-reviewer.md": """# Security Reviewer\nReview trust boundaries, authn/authz, secrets, input validation, injection, data exposure, dependencies, and least privilege.\n""",
-    "spec-reviewer.md": """# Spec Reviewer\nCheck traceability from requirement to acceptance criterion to feature/task/test/evidence and detect implementation/spec drift.\n""",
-    "integration-reviewer.md": """# Integration Reviewer\nCheck contracts across modules/services, migrations, backward compatibility, deployment, and operational behavior.\n""",
-}
-
-SKILLS = {
-    "create-feature-spec/SKILL.md": """---\nname: create-feature-spec\ndescription: Convert approved product intent into testable requirements and feature specifications.\n---\n# Create Feature Spec\nPreserve PRD intent. Separate fact, requirement, assumption, decision, and question. Assign stable IDs. Make acceptance criteria testable.\n""",
-    "architecture-design/SKILL.md": """---\nname: architecture-design\ndescription: Research and compare architecture options without silently choosing for the user.\n---\n# Architecture Design\nIdentify only material decisions. Present credible current options, tradeoffs, fit, and a recommendation. Record approved selections as ADRs.\n""",
-    "implement-task/SKILL.md": """---\nname: implement-task\ndescription: Implement one bounded task against approved specs and verification criteria.\n---\n# Implement Task\nRead relevant spec and ADRs. Make minimal cohesive changes. Add tests. Run checks. Never edit specs to hide implementation defects.\n""",
-    "verify-feature/SKILL.md": """---\nname: verify-feature\ndescription: Independently verify implementation against acceptance criteria and deterministic evidence.\n---\n# Verify Feature\nInspect diff, tests and runtime behavior. Map evidence to requirements. Return actionable findings and severity.\n""",
-    "spec-drift/SKILL.md": """---\nname: spec-drift\ndescription: Detect divergence between approved specifications and current implementation.\n---\n# Spec Drift\nCompare requirements, APIs, schema, behavior, tests and docs. Classify whether code is wrong, spec is stale, or a new change request is needed.\n""",
-    "security-review/SKILL.md": """---\nname: security-review\ndescription: Review a bounded change for security regressions and policy violations.\n---\n# Security Review\nReview trust boundaries, authn/authz, secret handling, input validation, injection, data exposure, dependencies and least privilege.\n""",
-    "reconcile/SKILL.md": """---\nname: reconcile\ndescription: Safely reconcile approved changes across specs, tasks, state, tests, and evidence.\n---\n# Reconcile\nInvalidate stale evidence, update dependency graph, regenerate affected tasks and preserve history. Never erase prior journal events.\n""",
-}
-
 TEMPLATES = {
-    "feature-spec.md": "# {feature_id} — {feature_name}\n\n## Summary\n\n## Requirements\n\n## Acceptance Criteria\n\n## Dependencies\n\n## Tasks\n",
+    "feature-spec.md": "# {feature_id} — {feature_name}\n\n## Summary\n\n## Invariants\n\n## Non-goals\n\n## Requirements\n\n## Acceptance Criteria\n\n## API contract\n\n## UX contract\n\n## Test matrix\n\n## Target files\n\n## Dependencies\n\n## Tasks\n",
     "adr.md": "# {adr_id} — {title}\n\n## Status\nAccepted\n\n## Context\n\n## Options Considered\n\n## Decision\n\n## Consequences\n",
     "evidence.md": "# Verification Evidence\n\n## Requirement / Acceptance Criterion\n\n## Evidence\n\n## Result\n",
 }
 
 
-def write_scaffold(root: Path) -> SDDPaths:
+CURSOR_COMMANDS = {
+    "sdd-ask.md": "# SDD Ask\n\nAnswer a project question using approved specs, ADRs, and `graphify query` when `graphify-out/graph.json` exists.\nRun `sdd ask \"<question>\"` in the project root. Do not mutate files.\n",
+    "sdd-change.md": "# SDD Change\n\nTurn an ad-hoc request into a classified change with an invalidation preview.\nRun `sdd change \"<request>\"` and approve only after reviewing affected tasks.\n",
+}
+
+CURSOR_RULE = "---\ndescription: Vega SDD repository contract\nalwaysApply: true\n---\nFollow `AGENTS.md`. Treat `.sdd/state/` as canonical execution state and `.sdd/specs/` as approved feature intent. Load only task-relevant skills from `.agents/skills/`.\nAsk project questions with `sdd ask`. Propose plan changes with `sdd change`.\n"
+
+
+def _is_stub(path: Path) -> bool:
+    if not path.exists():
+        return True
+    text = path.read_text(encoding="utf-8")
+    lines = [line for line in text.splitlines() if line.strip() and not line.startswith("---") and "name:" not in line and "description:" not in line]
+    return len(lines) <= 8
+
+
+def _is_previous_checklist(path: Path, content: str) -> bool:
+    """Upgrade framework skills that predate the failure-mode runbooks.
+
+    Files without the shipped YAML frontmatter are treated as local customizations.
+    """
+    if path.name != "SKILL.md" or "## Failure modes" not in content:
+        return False
+    current = path.read_text(encoding="utf-8")
+    if "## Failure modes" in current or not current.startswith("---\n"):
+        return False
+    return True
+
+
+def _write_if_needed(path: Path, content: str, *, overwrite: bool) -> str:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        path.write_text(content, encoding="utf-8")
+        return "added"
+    if overwrite or _is_stub(path) or _is_previous_checklist(path, content):
+        if path.read_text(encoding="utf-8") == content:
+            return "unchanged"
+        path.write_text(content, encoding="utf-8")
+        return "updated"
+    return "kept"
+
+
+def write_scaffold(root: Path, *, refresh: bool = False, force: bool = False) -> SDDPaths:
+    refresh_scaffold(root, refresh=refresh, force=force)
+    return SDDPaths(root)
+
+
+def refresh_scaffold(root: Path, *, refresh: bool = False, force: bool = False) -> dict[str, list[str]]:
     paths = SDDPaths(root)
     paths.ensure()
+    report = {"added": [], "updated": [], "kept": [], "unchanged": []}
+
+    def note(rel: str, action: str) -> None:
+        report[action].append(rel)
+
     agents_file = root / "AGENTS.md"
     if not agents_file.exists():
         agents_file.write_text(AGENTS_MD, encoding="utf-8")
+        note("AGENTS.md", "added")
     else:
         current = agents_file.read_text(encoding="utf-8")
         if "<!-- UNIVERSAL_SDD_START -->" not in current:
             agents_file.write_text(current.rstrip() + "\n\n" + AGENTS_MD, encoding="utf-8")
+            note("AGENTS.md", "updated")
+        elif refresh and "sdd ask" not in current:
+            start = current.find("<!-- UNIVERSAL_SDD_START -->")
+            end = current.find("<!-- UNIVERSAL_SDD_END -->")
+            if start >= 0 and end >= start:
+                agents_file.write_text(current[:start] + AGENTS_MD + current[end + len("<!-- UNIVERSAL_SDD_END -->"):], encoding="utf-8")
+                note("AGENTS.md", "updated")
+
     for name, content in ROLE_FILES.items():
-        target = paths.roles / name
-        if not target.exists():
-            target.write_text(content, encoding="utf-8")
-        # Thin vendor adapters: canonical role text remains in .agents/roles.
-        for vendor_dir in [root / ".cursor" / "agents", root / ".claude" / "agents", root / ".codex" / "agents"]:
-            vendor_dir.mkdir(parents=True, exist_ok=True)
-            adapter = vendor_dir / name
-            if not adapter.exists():
-                adapter.write_text(content + "\nCanonical SDD sources: `AGENTS.md`, `.sdd/`, and `.agents/`.\n", encoding="utf-8")
+        rel = f".agents/roles/{name}"
+        note(rel, _write_if_needed(paths.roles / name, content, overwrite=force))
+        for vendor in (".cursor", ".claude", ".codex"):
+            adapter = root / vendor / "agents" / name
+            vendor_text = content + "\nCanonical SDD sources: `AGENTS.md`, `.sdd/`, and `.agents/`.\n"
+            note(f"{vendor}/agents/{name}", _write_if_needed(adapter, vendor_text, overwrite=force))
 
     claude_md = root / "CLAUDE.md"
     if not claude_md.exists():
         claude_md.write_text("# Claude Code SDD Adapter\n\nFollow `AGENTS.md`. Canonical product/spec/state lives under `.sdd/`; reusable workflows live under `.agents/skills/`. Do not create Claude-only product requirements.\n", encoding="utf-8")
+        note("CLAUDE.md", "added")
     cursor_rule = root / ".cursor" / "rules" / "vega-sdd.mdc"
-    cursor_rule.parent.mkdir(parents=True, exist_ok=True)
-    if not cursor_rule.exists():
-        cursor_rule.write_text("---\ndescription: Vega SDD repository contract\nalwaysApply: true\n---\nFollow `AGENTS.md`. Treat `.sdd/state/` as canonical execution state and `.sdd/specs/` as approved feature intent. Load only task-relevant skills from `.agents/skills/`.\n", encoding="utf-8")
+    note(".cursor/rules/vega-sdd.mdc", _write_if_needed(cursor_rule, CURSOR_RULE, overwrite=refresh or force))
+    for name, content in CURSOR_COMMANDS.items():
+        note(f".cursor/commands/{name}", _write_if_needed(root / ".cursor" / "commands" / name, content, overwrite=refresh or force))
 
     for rel, content in SKILLS.items():
-        target = paths.skills / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
-            target.write_text(content, encoding="utf-8")
+        note(f".agents/skills/{rel}", _write_if_needed(paths.skills / rel, content, overwrite=force))
     for name, content in TEMPLATES.items():
-        target = paths.templates / name
-        if not target.exists():
-            target.write_text(content, encoding="utf-8")
-    return paths
+        note(f".sdd/templates/{name}", _write_if_needed(paths.templates / name, content, overwrite=force))
+    return {key: value for key, value in report.items() if value}

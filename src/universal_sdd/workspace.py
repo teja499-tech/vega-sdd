@@ -119,6 +119,42 @@ def inside(root: Path, relative: str):
 
 def policy_path(root): return Path(root) / '.sdd/workspace.yaml'
 def policy_hash(root): return hashlib.sha256(policy_path(root).read_bytes()).hexdigest()
+
+def require_approved_capabilities(root: Path, agent_name):
+    """Require approval before a real agent can load repository capabilities."""
+    name = getattr(agent_name, 'value', str(agent_name))
+    if name == 'mock':
+        return None
+    if not policy_path(root).exists():
+        raise RuntimeError('Approve a project policy before real-agent execution: sdd project setup')
+    return load_workspace(root)
+
+def capability_hash(root):
+    """Bind approved execution to the agent instructions, roles, and skills it will load."""
+    root=Path(root);h=hashlib.sha256()
+    candidates=[]
+    for name in ('.mcp.json','.cursor/mcp.json','.cursorignore','.cursorindexingignore','.geminiignore','.github/copilot-instructions.md'):
+        path=root/name
+        if path.exists():candidates.append(path)
+    for pattern in (
+        '.agents/**/*', '.codex/**/*', '.claude/**/*', '.gemini/**/*',
+        '.cursor/agents/**/*', '.cursor/rules/**/*',
+        '.github/instructions/**/*.instructions.md', '.github/agents/**/*',
+        '.github/skills/**/*', '.github/hooks/**/*', '.github/prompts/**/*',
+        '.github/copilot/**/*',
+        '**/AGENTS.md', '**/CLAUDE.md', '**/GEMINI.md',
+    ):
+        candidates.extend(sorted(root.glob(pattern)))
+    unique=sorted(set(candidates),key=lambda p:p.relative_to(root).as_posix())
+    if len(unique)>1000:raise RuntimeError('Capability catalog exceeds 1000 files')
+    total=0
+    for path in unique:
+        if path.is_dir() or any(part in {'.git','node_modules','.venv','venv','dist','build'} for part in path.relative_to(root).parts):continue
+        if path.is_symlink() or not path.is_file():raise RuntimeError('Capability files must be regular files: '+str(path.relative_to(root)))
+        size=path.stat().st_size;total+=size
+        if size>1_000_000 or total>32_000_000:raise RuntimeError('Capability files exceed approval size bounds')
+        rel=path.relative_to(root).as_posix();h.update(rel.encode()+b'\0'+path.read_bytes()+b'\0')
+    return h.hexdigest()
 def load_workspace(root):
     config = Workspace.model_validate(load_yaml(policy_path(root)))
     for c in config.components:
@@ -126,6 +162,8 @@ def load_workspace(root):
         if c.artifact: inside(inside(Path(root), c.path), c.artifact)
     approval = load_yaml(Path(root) / '.sdd/state/workspace-approval.yaml', {}) or {}
     if approval.get('sha256') != policy_hash(root): raise RuntimeError('Policy changed or not approved; review and configure it')
+    if approval.get('capabilities_sha256') != capability_hash(root):
+        raise RuntimeError('Agent instructions, roles, or skills changed after approval; review them and reconfigure the project policy')
     return config
 
 def configure(root: Path, data: dict):
@@ -141,7 +179,9 @@ def configure(root: Path, data: dict):
         copy = root / '.sdd/history/policies' / (old+'.yaml'); copy.parent.mkdir(parents=True,exist_ok=True)
         copy.write_bytes(target.read_bytes())
     dump_yaml(target,config)
-    dump_yaml(root/'.sdd/state/workspace-approval.yaml',{'sha256':policy_hash(root),'approved_at':utcnow()})
+    dump_yaml(root/'.sdd/state/workspace-approval.yaml',{
+        'sha256':policy_hash(root),'capabilities_sha256':capability_hash(root),'approved_at':utcnow()
+    })
     return config
 
 def gaps(config):
@@ -198,16 +238,17 @@ def fingerprint(root):
             if subprocess.run(['git','-C',str(path),'status','--porcelain'],capture_output=True).stdout:raise RuntimeError('Dirty submodule: '+name)
         else:h.update(b'<deleted>')
     h.update(policy_hash(root).encode())
+    h.update(capability_hash(root).encode())
     return h.hexdigest()
 
 def run_checks(root, phase='all'):
     root=Path(root); cfg=load_workspace(root)
     if gaps(cfg):raise RuntimeError('; '.join(gaps(cfg)))
-    if phase not in {'all','task'}:raise ValueError('Invalid phase')
+    if phase not in {'all','task','feature','release'}:raise ValueError('Invalid phase')
     before=fingerprint(root); results=[]
     for c in ordered(cfg.components):
         for name,cmd in c.checks.items():
-            if phase=='task' and cmd.run_at=='release':continue
+            if phase in {'task', 'feature'} and cmd.run_at=='release':continue
             result=execute(cmd,inside(root,c.path));results.append({'component':c.id,'check':name,**result})
             if result['returncode']:break
         if results and results[-1]['returncode']:break

@@ -192,5 +192,7 @@ def single_writer(fn):
         bound = inspect.signature(fn).bind(*args, **kwargs)
         root = bound.arguments["root"]
         with project_lock(root):
+            from .artifacts import recover_projection_transaction
+            recover_projection_transaction(SDDPaths(Path(root)))
             return fn(*args, **kwargs)
     return wrapped
