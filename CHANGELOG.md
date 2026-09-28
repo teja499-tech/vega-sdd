@@ -7,6 +7,7 @@ This file summarizes human-visible changes. Individual project specifications an
 - Add a discoverable capability registry: tasks can name up to eight safe project/domain skills, routing metadata selects risk-specific runbooks, and context packs include developer/QA plus specialist role contracts through progressive disclosure.
 - Add reliability, performance, E2E, migration-safety, and agent-system runbooks inspired by ECC's strongest composable-skill patterns; keep lifecycle authority and permissions in the controller.
 - Bind real-agent workspace approval to `AGENTS.md`, roles, and skill contents so changed project-local instructions cannot execute under an old approval.
+- Keep project-local skill bodies out of initialization prompts before approval; only safe names are visible unless the skill is packaged with Vega.
 - Protect `.sdd/runtime` task baselines and projection journals from agent mutation; reject unsafe/symlinked recovery paths.
 - Restore the original Git ref before resetting its commit so a read-only agent branch switch cannot rewrite the visited branch; replace the captured index atomically.
 - Serialize scaffold, graph refresh, clarification, ask, and change-analysis operations through the project lock while preserving the out-of-band pause signal.

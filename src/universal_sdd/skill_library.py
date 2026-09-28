@@ -293,10 +293,25 @@ def skill_catalog(*names: str, root: Path | None = None) -> str:
 
 
 def available_task_skills(root: Path | None = None) -> str:
-    """Compact catalog for spec authors. Lifecycle skills are controller-selected."""
+    """Safe init-time catalog; project-local bodies are not injected before approval."""
     lifecycle = set(LIFECYCLE_SKILLS.values())
-    names = [name for name in discover_skills(root) if name not in lifecycle]
-    return skill_catalog(*names, root=root)
+    packaged = {
+        rel.split("/", 1)[0]: _skill_info(rel.split("/", 1)[0], text, None)
+        for rel, text in SKILLS.items()
+    }
+    lines = [
+        f"- {name}: {info.description} — use only when the task materially matches."
+        for name, info in packaged.items()
+        if name not in lifecycle
+    ]
+    if root is not None:
+        local_names = sorted(set(discover_skills(root)) - set(packaged))
+        lines.extend(
+            f"- {name}: project-local runbook; select only when the PRD explicitly names it. "
+            "Its body is intentionally withheld until capability approval."
+            for name in local_names
+        )
+    return "\n".join(lines)
 
 
 def roles_for_phase(phase: str, skills: list[str]) -> tuple[str, list[str]]:
