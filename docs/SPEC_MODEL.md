@@ -2,18 +2,13 @@
 
 Vega SDD uses structured identity across product intent and implementation.
 
-```text
-Requirement
-   ↓
-Acceptance criteria
-   ↓
-Feature
-   ↓
-Task
-   ↓
-Code / tests
-   ↓
-Verification evidence
+```mermaid
+flowchart TD
+    R[Requirement] --> A[Acceptance criteria]
+    A --> F[Feature]
+    F --> T[Task]
+    T --> C[Code and tests]
+    C --> E[Verification evidence]
 ```
 
 ## Requirements
@@ -49,6 +44,7 @@ A task includes:
 - requirements implemented,
 - task dependencies,
 - deterministic verification expectations,
+- up to eight safe project/domain skill names (lifecycle skills remain controller-selected),
 - attempts/evidence/status.
 
 ## Why YAML plus Markdown

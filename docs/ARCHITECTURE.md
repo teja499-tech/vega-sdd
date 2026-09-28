@@ -1,44 +1,21 @@
-> **Vega SDD 0.4.0:** Graphify is the retrieval graph and Headroom compresses controller prompts. Neither replaces `.sdd/` state, and neither imposes a token cap. See [project lifecycle](PROJECT_LIFECYCLE.md) for delivery policies.
-
-> **Vega SDD 0.3.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical.
-
-> **0.1.1 audit status:** Experimental controller. See the [verification report](VERIFICATION_REPORT.md) for tested behavior, defects repaired, missing features, and live-provider limitations. Earlier broad descriptions below are not certification.
-
 # Vega SDD Architecture
+
+This document describes the 0.4.0 controller. Graphify is optional retrieval and Headroom is optional prompt compression; neither replaces canonical `.sdd/` state or imposes a token-stop policy. See [project lifecycle](PROJECT_LIFECYCLE.md) for delivery and [0.4.0 verification](VERIFICATION_0.4.0.md) for tested boundaries.
 
 ## System shape
 
-```text
-User
-  │
-  ▼
-SDD CLI / Control Plane
-  ├── Product discovery
-  ├── Architecture decision workflow
-  ├── Spec generator
-  ├── State engine
-  ├── Dependency scheduler
-  ├── Verification/review loop
-  ├── Change classifier/reconciler
-  ├── Graphify retrieval (optional CLI)
-  ├── Headroom compression (optional library)
-  └── Event journal
-        │
-        ▼
-AgentAdapter
-  ├── CursorAdapter
-  ├── CodexAdapter
-  ├── ClaudeAdapter
-  ├── GeminiAdapter
-  ├── CopilotAdapter
-  └── MockAdapter
-        │
-        ▼
-Repository
-  ├── Product/spec/ADR artifacts
-  ├── Application code/tests
-  └── Durable execution evidence
+```mermaid
+flowchart TD
+    U[User and PRD] --> C[Vega CLI and control plane]
+    C --> A[Selected agent adapter]
+    A --> R[Application code and tests]
+    C --> S[Canonical specs and state]
+    C --> E[Checks, review, and evidence]
+    R --> E
+    S --> E
 ```
+
+The control plane contains product discovery, architecture/spec generation, state and dependency scheduling, change reconciliation, verification/repair, optional Graphify retrieval, optional Headroom compression, and the event journal. The adapter layer normalizes Cursor, Codex, Claude, Gemini, Copilot, and mock provider behavior.
 
 ## Ownership boundaries
 
@@ -70,17 +47,14 @@ V1 deliberately uses a single writer. This avoids concurrent edit conflicts and 
 
 ## Verification flow
 
-```text
-implementation
-  ↓
-configured test/lint/typecheck
-  ↓
-independent reviewer
-  ↓ fail
-repair agent ──┐
-  └────────────┘ (bounded retries)
-  ↓ pass
-verified task + evidence
+```mermaid
+flowchart TD
+    I[Implementation] --> C[Configured deterministic checks]
+    C -->|fail| R[Bounded repair]
+    R --> I
+    C -->|pass| V[Independent review]
+    V -->|blocking finding| R
+    V -->|pass| E[Verified task and evidence]
 ```
 
 Deterministic checks have priority over LLM confidence. A failing configured command blocks review completion.

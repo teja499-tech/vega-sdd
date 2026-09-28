@@ -1,8 +1,8 @@
 # Releasing Vega SDD
 
-Maintainers publish a version only after source, docs and the wheel agree on the name, CLI and version. The initial public release uses `vega-sdd` as the distribution name and `sdd` as the command. The import module is `universal_sdd` for compatibility.
+Maintainers publish a version only after source, docs, examples, and the wheel agree on the name, CLI, and version. The distribution name is `vega-sdd`, the command is `sdd`, and the import module remains `universal_sdd` for compatibility.
 
-1. Update `pyproject.toml`, `src/universal_sdd/__init__.py`, README status and CHANGELOG with one release version. Review docs and examples for obsolete commands.
+1. Update `pyproject.toml`, `src/universal_sdd/__init__.py`, README status, current verification guide, and CHANGELOG with one release version. Review every guide/example for obsolete commands and historical claims presented as current.
 2. Run the repository CI jobs, the incident and cross-project benchmarks, and build an sdist and wheel from a clean checkout.
 3. Inspect archive contents, metadata and entry point; install the wheel in a clean virtual environment and run `sdd --help`. Check secrets and generated artifacts are absent.
 4. Publish **that exact verified distribution** to PyPI using a trusted publisher or a scoped project token. Avoid a release number already on PyPI; published files cannot be replaced.

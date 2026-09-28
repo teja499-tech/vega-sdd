@@ -1,6 +1,6 @@
 # Cross-project research and disposition — 2026-09-26
 
-This is a synthesis of current primary guidance and the original framework audit. The common lifecycle is portable; execution, validation and governance differ by project. The 0.1.2 controller already produced human design documents, specs, traceability, changelog and commit links; the main gaps were executable cross-project contracts, repo review controls, CI export and release/operation recovery.
+This is a synthesis of primary guidance and the framework audit history. The common lifecycle is portable; execution, validation and governance differ by project. Vega 0.4.0 includes human design documents, specs, traceability, changelog/commit links, executable cross-project contracts, repository review controls, CI export, capability routing, and release/recovery contracts.
 
 | Area | Reference | Implemented consequence | Project-specific work |
 | --- | --- | --- | --- |
@@ -19,4 +19,4 @@ Web/service, CLI, documentation and embedded profiles require browser/contract, 
 
 Open obligations remain deliberate: no native GitLab/Azure PR implementation, no automatic cloud setup or signing keys, no complete mobile/desktop/embedded/ML platform certification, no fleet polling/cost governor, no signed audit attestations, no generic migration/backup/observability or compliance certification. The project owner must select meaningful toolchains, check coverage, reviewers, incident ownership, vulnerability contacts, retention and rollback. A populated Markdown design document is a reading aid, not proof the architecture was independently validated.
 
-See [the lifecycle guide](PROJECT_LIFECYCLE.md) for operation and [verification evidence](VERIFICATION_0.2.0.md) for tested boundaries.
+See [the lifecycle guide](PROJECT_LIFECYCLE.md) for operation and [0.4.0 verification evidence](VERIFICATION_0.4.0.md) for tested boundaries. Historical verification documents remain available for release provenance.

@@ -1,10 +1,6 @@
-> **Vega SDD 0.4.0:** Gemini CLI and GitHub Copilot CLI are primary adapters. `python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change`. Prompts include selected role/skill metadata only; runbooks stay in `.agents/` and are bound to workspace approval.
-
-> **Vega SDD 0.3.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical.
-
-> **0.1.1 audit status:** Experimental controller. See the [verification report](VERIFICATION_REPORT.md) for tested behavior, defects repaired, missing features, and live-provider limitations. Earlier broad descriptions below are not certification.
-
 # Agent Adapters
+
+Vega SDD 0.4.0 supports Cursor, Codex, Claude Code, Gemini CLI, GitHub Copilot CLI, and a deterministic mock adapter. Prompts include selected role/skill metadata only; runbooks remain in `.agents/` and are bound to workspace approval. `python -m universal_sdd.mcp_server` exposes preview/read-only project tools.
 
 Adapters isolate vendor-specific command syntax from SDD lifecycle semantics.
 
@@ -19,6 +15,16 @@ An adapter reports capabilities and implements a bounded `run` operation plus in
 - event callback.
 
 The adapter returns normalized `AgentResult`/`AgentEvent` objects.
+
+Initialization runs the selected adapter inside an isolated framework-owned workspace. A bounded brownfield source copy is available for inspection, while known provider instruction/settings/hooks/context-filter surfaces and common secret files are omitted until the project capability set is reviewed and approved. Later real-agent entry points require current workspace/capability approval.
+
+Inspect availability before selecting an adapter:
+
+```bash
+sdd doctor
+sdd agent list
+sdd agent use cursor
+```
 
 ## Cursor
 
@@ -55,6 +61,16 @@ Set `review_agent` in `.sdd/config.yaml` to use a different installed adapter fo
 ## Mock
 
 The mock adapter returns deterministic structured responses and powers the repository's end-to-end tests. It should never be chosen for real application development.
+
+## Permissions and unrestricted mode
+
+Provider sandboxes and the controller mutation guard are complementary. The normal adapter shape asks for only the access needed by the phase. Unrestricted flags are never the default:
+
+```bash
+sdd start --allow-unrestricted --max-tasks 1
+```
+
+Use that option only in an isolated workspace with least-privilege credentials. The controller can restore repository mutations; it cannot prevent secret reads or network use by a broadly authorized provider process.
 
 ## Adding another coding agent
 

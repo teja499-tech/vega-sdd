@@ -4,6 +4,7 @@ This file summarizes human-visible changes. Individual project specifications an
 
 ## [0.4.0] - 2026-09-27
 
+- Reorganize documentation around executable user journeys: add ChatGPT/Claude-assisted PRD discovery, greenfield/brownfield/defect/change/recovery/monorepo/delivery recipes, an exact CLI command reference, current sample output, a documentation index, and 0.4.0 verification evidence.
 - Add a discoverable capability registry: tasks can name up to eight safe project/domain skills, routing metadata selects risk-specific runbooks, and context packs include developer/QA plus specialist role contracts through progressive disclosure.
 - Add reliability, performance, E2E, migration-safety, and agent-system runbooks inspired by ECC's strongest composable-skill patterns; keep lifecycle authority and permissions in the controller.
 - Bind real-agent workspace approval to `AGENTS.md`, roles, and skill contents so changed project-local instructions cannot execute under an old approval.

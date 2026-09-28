@@ -1,106 +1,203 @@
 # Vega SDD
 
-**Keep the project in the repo. Put coding agents to work on it.**
+**Turn a PRD into a repository-owned, reviewable software delivery workflow.**
 
-Vega SDD is an open source, repository-owned framework for planning, implementing, reviewing, and releasing software with AI coding agents. It connects product intent, human-readable design, tasks, checks, changes, and release evidence so a project can continue across sessions and agent tools.
+Vega SDD is an open-source control plane for building software with Cursor, Codex, Claude Code, Gemini CLI, or GitHub Copilot CLI. Product intent, architecture decisions, tasks, checks, review evidence, changes, and recovery state stay in the repository, so work can continue across terminals, sessions, and coding agents.
 
-> **Status:** 0.4.0 alpha. The controller and mock adapter have local test coverage. A bounded Taskline AI run exercised Graphify retrieval, Headroom compression, `sdd ask`, and `sdd change`. Real coding-agent CLIs, GitHub hosting controls, deployed environments, and non-Linux platforms still require validation in your own setup. [See verification notes](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md).
+> **Status: 0.4.0 alpha.** The framework has 205 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, hosted branch protection, deployment hooks, and application-specific safety remain your responsibility. See [0.4.0 verification](docs/VERIFICATION_0.4.0.md).
 
-## Start here
+## Choose your starting point
 
-Requires Python 3.11 or later. Install the package, then run commands in a project repository:
+| You have | Start here |
+| --- | --- |
+| An idea, but no PRD | [Create a PRD with ChatGPT or Claude](docs/PRD_DISCOVERY.md) |
+| A PRD and an empty repository | [Greenfield journey](docs/USE_CASES.md#1-build-a-new-application-from-a-prd) |
+| An existing application to enhance | [Brownfield journey](docs/USE_CASES.md#2-add-a-feature-to-an-existing-application) |
+| A defect in an SDD-managed project | [Defect journey](docs/USE_CASES.md#3-fix-a-defect-without-changing-approved-intent) |
+| A changed requirement or architecture decision | [Change journey](docs/USE_CASES.md#4-change-an-approved-requirement) |
+| A paused, failed, or interrupted run | [Recovery journey](docs/USE_CASES.md#5-resume-or-recover-work) |
+| A completed application needing documentation | [Adoption journey](docs/USE_CASES.md#8-adopt-and-document-a-mature-application) |
+
+## Five-minute safe trial
+
+Requires Python 3.11 or later. The mock adapter exercises the lifecycle without changing application code or requiring an agent login.
 
 ```bash
 python -m pip install vega-sdd
-sdd doctor
-cd path/to/your-project
-sdd init
+
+mkdir vega-demo
+cd vega-demo
+git init
+printf '# Notes API\n\nBuild an API where a user can create and list notes. Persist notes and include tests.\n' > PRD.md
+
+sdd init --agent mock --project-kind new --yes
 sdd status
 sdd requirements
 sdd architecture
 sdd roadmap
 sdd verify
-sdd project setup
-# Review generated policy and files, then commit the baseline.
-sdd repo branch first-scope
-sdd start --max-tasks 1
-```
-
-For a deterministic trial without a coding-agent login, create a disposable project with a `PRD.md` and run:
-
-```bash
-sdd init --agent mock --project-kind new --yes
-sdd verify
 sdd start
 ```
 
-The mock adapter exercises the workflow; it does not implement production code. For real work, use `sdd doctor` to inspect installed agent CLIs, choose an adapter during initialization, and configure the project's actual check commands before starting. See the [user guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USER_GUIDE.md).
+Typical initialization summary:
 
-## What it manages
-
-| Stage | Repository-owned result |
-| --- | --- |
-| Discover | Product questions, requirements, acceptance criteria, and a roadmap |
-| Design | System overview, architecture decisions, high and low level design, and data design where applicable |
-| Build | Dependency-ordered tasks and bounded agent work |
-| Verify | Project-specific tests, review and repair evidence |
-| Change | Human-readable change history tied to tasks and actual commits |
-| Deliver | Branch and PR policies, CI templates, release criteria and environment receipts |
-
-The generated documents describe the approved project state; they are not proof that an agent's proposed design is correct. Humans approve material requirement and architecture changes. Vega SDD does not replace your Git host, CI service, cloud provider, or repository access controls.
-
-## Project fit
-
-The project policy supports new and existing applications, APIs, libraries, CLIs, data pipelines, infrastructure, utilities, frameworks, and monorepos. Each project supplies its own verification and deployment commands. An existing project can be adopted with `sdd init --project-kind existing`; the framework does not assume every project has a database or deployment environment.
-
-The [lifecycle guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PROJECT_LIFECYCLE.md) documents project-kind policies, branching and PR gates, CI exports, releases, and deployment receipts. The [design documentation guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) covers generated artifacts and commit-linked history.
-
-## Day-to-day commands
-
-```bash
-sdd status                 # spec, implementation and verification progress
-sdd watch                  # follow durable project state
-sdd start                  # work through ready tasks
-sdd pause                  # stop at a task boundary
-sdd resume                 # continue from repository state
-sdd ask "Question"         # read-only answer from specs, ADRs, and Graphify
-sdd change "Describe it"  # classify a change; approve before intent is rewritten
-sdd graph refresh          # rebuild the local Graphify knowledge graph
-sdd scaffold               # add missing skills and upgrade old framework checklists
-sdd agent use cursor       # cursor, codex, claude, gemini, or copilot
+```text
+4/4 Readiness review
+✓ Requirements: 1
+✓ Features: 1
+✓ Architecture decisions: 1
+✓ Traceability: valid (0 warning(s))
+Project is ready for implementation.
 ```
 
-Run `sdd --help` for the full command list. The project state lives under `.sdd/`. Graphify writes `graphify-out/` and does not replace that state. Reusable roles and skills live under `.agents/`. Task contracts may name project/domain skills explicitly, while routing metadata selects cross-cutting security, reliability, performance, E2E, migration, AI-agent, API, data, UX, and documentation runbooks by risk. Prompts carry only the selected role/skill descriptions; the agent loads those files on demand. The approved workspace policy is bound to a digest of `AGENTS.md`, roles, and skills, so capability changes require review before the next real-agent run. Vendor-specific files are thin adapters. One primary coding agent writes at a time; separate reviewer roles and deterministic checks inspect the work.
+The mock adapter validates orchestration only. Use a real adapter to build the application.
 
-Optional local tools, installed separately:
+## Build a real project
+
+Install and authenticate at least one supported coding-agent CLI, then run these commands from the repository root:
+
+```bash
+python -m pip install vega-sdd
+sdd doctor
+
+# PRD.md must exist. Use --project-kind existing for a brownfield repository.
+sdd init --prd PRD.md --agent cursor --project-kind new
+
+# Review the generated contract before allowing code changes.
+sdd requirements
+sdd architecture
+sdd roadmap
+sdd verify
+
+# Configure real project checks and approve agent capabilities.
+sdd project inspect
+sdd project setup
+sdd project check
+
+# Review the baseline, exclude secrets or local caches, then commit it.
+git status --short
+git add -A
+git status --short
+git commit -m "Initialize Vega SDD project"
+sdd repo branch first-scope
+
+# Start with one bounded task, inspect it, then continue.
+sdd start --max-tasks 1
+sdd status
+sdd log --limit 30
+sdd resume
+```
+
+Replace `cursor` with `codex`, `claude`, `gemini`, or `copilot`. `sdd doctor` shows which adapters are installed. For consequential projects, do not use `--yes` until the PRD already fixes all material product and architecture constraints.
+
+## What happens during a run
+
+```mermaid
+flowchart TD
+    A[PRD and repository evidence] --> B[Product discovery]
+    B --> C[Interactive architecture decisions]
+    C --> D[Requirements, features, and tasks]
+    D --> E[One bounded implementation task]
+    E --> F[Deterministic project checks]
+    F --> G[Independent review]
+    G -->|repair needed| E
+    G -->|verified| H[Evidence and durable state]
+    H --> I[Next dependency-ready task]
+```
+
+Vega owns state transitions; the agent writes application code. A task is not complete because an agent says it is complete. Configured checks, reviewer findings, traceability, and stored evidence decide that.
+
+## Everyday commands
+
+```bash
+sdd status                                   # durable progress
+sdd watch                                    # continuously refresh progress
+sdd ask "Which requirement defines exports?" # read-only project answer
+sdd pause                                    # stop at the next safe task boundary
+sdd resume                                   # continue without the old chat
+sdd intervene                                # interactive architect conversation
+sdd change "Profiles need separate language preferences" # classify impact
+sdd clarify                                  # list unresolved decisions
+sdd task retry TASK-F001-003 --keep-code
+sdd docs refresh --enrich                    # refresh human design docs read-only
+sdd graph refresh                            # optional local code graph
+```
+
+See the [command reference](docs/COMMAND_REFERENCE.md) for the complete CLI.
+
+## Capabilities at a glance
+
+- PRD-first product discovery with durable clarifications.
+- Interactive architecture workshop with explicit human decisions and ADRs.
+- Stable requirement, acceptance-criterion, feature, and task IDs.
+- Dependency-aware task scheduling with pause, resume, retry, and recovery.
+- Deterministic application checks before AI review.
+- Independent review and bounded repair loops.
+- Risk-routed API, data, UX, security, reliability, performance, migration, E2E, and agent-system runbooks.
+- Project-specific skills with approval-bound agent instructions.
+- Read-only project questions, change classification, and explicit intent approval.
+- Human HLD/LLD/API/data/security/operations/test documentation.
+- Graphify retrieval and optional Headroom context compression.
+- Branch, pull-request, CI export, immutable build, deployment, rollback, and checkpoint contracts.
+- New applications, existing systems, monorepos, libraries, CLIs, data pipelines, infrastructure, mobile, ML, and custom projects.
+
+The complete capability inventory is in [FEATURES.md](docs/FEATURES.md).
+
+## Repository-owned outputs
+
+| Location | Purpose |
+| --- | --- |
+| `PRD.md` | Human-owned source product brief |
+| `AGENTS.md` | Shared agent rules |
+| `.sdd/product/` | Product model and clarifications |
+| `.sdd/architecture/`, `.sdd/decisions/` | Architecture state and ADRs |
+| `.sdd/specs/`, `.sdd/state/` | Feature contracts and canonical execution state |
+| `.sdd/docs/` | Generated human design documentation |
+| `.sdd/journal/`, `.sdd/evidence/` | Events and verification evidence |
+| `.agents/roles/`, `.agents/skills/` | Approved roles and reusable runbooks |
+| `graphify-corpus/`, `graphify-out/` | Optional traceability corpus and local code graph |
+
+Commit `.sdd/`, `.agents/`, `AGENTS.md`, and the PRD with the project. Do not commit credentials or vendor session caches.
+
+## Optional local tools
 
 ```bash
 python -m pip install graphifyy headroom-ai
+sdd doctor
+sdd graph refresh
+sdd graph query "authentication request path"
 ```
 
-`graphifyy` provides the `graphify` CLI. `sdd doctor` reports whether Graphify and Headroom are available. A run continues when either is missing: retrieval falls back to the working-set file list, and prompts keep the compact text already on disk. Vega SDD does not stop a task because an estimated token count crossed a cap. `sdd status` records raw versus compressed size when Headroom shrinks a pack or check log.
+Graphify improves local structural retrieval. Headroom compresses context packs and check logs when doing so makes them smaller. Neither replaces canonical `.sdd/` state, and missing either tool does not block development.
 
-## Documentation
+## Documentation map
 
-| Guide | Covers |
+| Guide | Use it for |
 | --- | --- |
-| [Getting started](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USER_GUIDE.md) | Project initialization and everyday use |
-| [Project lifecycle](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PROJECT_LIFECYCLE.md) | Project kinds, checks, branches, PRs, CI and deployment |
-| [Design and history](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) | Human-readable design and commit-linked changelog |
-| [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, agents and durable state |
-| [Specification model](https://github.com/teja499-tech/vega-sdd/blob/main/docs/SPEC_MODEL.md) | Requirement, feature and task identity |
-| [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, and mock boundaries |
-| [Verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.2.0.md) | Local results and remaining qualification |
-| [Research and gaps](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RESEARCH_AND_GAPS.md) | Cross-project design rationale |
+| [User guide](docs/USER_GUIDE.md) | Complete setup and daily workflow |
+| [PRD discovery](docs/PRD_DISCOVERY.md) | Turn an idea into a framework-ready PRD using ChatGPT, Claude, or another assistant |
+| [Use-case journeys](docs/USE_CASES.md) | Copy/paste flows for greenfield, brownfield, defects, changes, recovery, monorepos, and delivery |
+| [Command reference](docs/COMMAND_REFERENCE.md) | Exact CLI groups, options, and examples |
+| [Feature reference](docs/FEATURES.md) | What every framework capability does |
+| [Project lifecycle](docs/PROJECT_LIFECYCLE.md) | Policies, checks, branches, PRs, CI, releases, and portfolios |
+| [Human documentation](docs/HUMAN_DOCUMENTATION.md) | HLD/LLD/API/data/security/operations docs and history |
+| [Architecture](docs/ARCHITECTURE.md) | Controller, adapters, state, capability routing, and safety boundaries |
+| [Agent adapters](docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, mock, and MCP behavior |
+| [Recovery](docs/RECOVERY.md) | Crash recovery, checkpoints, and context hygiene |
+| [0.4.0 verification](docs/VERIFICATION_0.4.0.md) | Reproducible test and benchmark evidence |
 
-## Contributing and security
+## Safety boundaries
 
-See [CONTRIBUTING.md](https://github.com/teja499-tech/vega-sdd/blob/main/CONTRIBUTING.md) for a local setup and review expectations, [SECURITY.md](https://github.com/teja499-tech/vega-sdd/blob/main/SECURITY.md) for reporting vulnerabilities, and [CHANGELOG.md](https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md) for releases. The project is licensed under [Apache 2.0](https://github.com/teja499-tech/vega-sdd/blob/main/LICENSE).
+Vega is a controller, not an operating-system sandbox. Use least-privilege agent credentials, provider sandbox controls, protected branches, reviewed policies, and isolated environments. Real-agent entry points require an approved workspace and capability digest. Initialization uses an isolated, bounded source view that excludes known agent-instruction and common secret files. Read-only calls restore accidental source and Git metadata mutations, but they cannot prevent a broadly privileged provider process from reading secrets or using the network.
+
+## Contributing
 
 ```bash
+git clone https://github.com/teja499-tech/vega-sdd.git
+cd vega-sdd
 python -m pip install -e '.[dev]'
 python -m pytest tests
 python -m build
 ```
 
-Report bugs and feature requests through [GitHub Issues](https://github.com/teja499-tech/vega-sdd/issues). Include the CLI version, OS, Python version, project kind, agent adapter, reproduction steps and redacted logs.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md). Report issues with the Vega version, OS, Python version, project kind, adapter, reproduction steps, and redacted logs.

@@ -1,6 +1,6 @@
-# Human documentation and enterprise repository support — v0.1.2
+# Human documentation and repository support
 
-Vega SDD now generates an indexed Markdown documentation pack and human-readable engineering history. The pack is based on the canonical SpecBundle and approved ADRs. It is not a certification that a repository is enterprise-ready.
+Vega SDD 0.4.0 generates an indexed Markdown documentation pack and human-readable engineering history. The pack is based on the canonical specification bundle and approved ADRs. It is not a certification that a repository is enterprise-ready.
 
 ## Documents generated
 
@@ -71,7 +71,7 @@ Canonical specification updates also retain content-addressed JSON snapshots and
 
 ## Commit attribution
 
-SDD does not create or push commits on your behalf. When the coding agent is already authorized to commit, include an exact trailer:
+Coding agents do not create commits. By default Vega also leaves verified changes uncommitted. The optional `sdd lifecycle` flow may create a controller-owned commit only when the approved repository policy explicitly sets `auto_commit: true`; push remains separately controlled. For a human-created commit, include an exact trailer:
 
 ```text
 Implement incident status update
@@ -90,8 +90,8 @@ The command validates the task, hexadecimal SHA, local commit object and reachab
 
 Without a link, history says attribution is pending; it never treats the latest unrelated HEAD as that task's implementation commit. Raw remote URLs are not emitted, avoiding accidental exposure of credentials in remotes. The full SHA is available for local Git inspection or enterprise tooling.
 
-## Remaining enterprise work
+## Project-specific work that remains
 
-The framework still needs live-provider qualification, stronger agent isolation, journal replay recovery and an objective production release evaluator. Adaptive architecture research and research provenance remain partial from the prior audit. Application-specific CI/CD, branch protection, dependency/security scans, SBOM/signing, CODEOWNERS, legal policies, SLOs and disaster recovery exercises require real project choices and evidence. This release adds documentation contracts for them where relevant; it does not falsely mark them implemented or generate a universal pipeline that cannot fit every stack.
+Live provider versions and credentials, OS-level isolation, application-specific CI/CD, branch protection, dependency/security scans, SBOM/signing, CODEOWNERS, legal policies, SLOs, accessibility, performance, data migration, and disaster-recovery exercises require real project choices and evidence. Vega supplies contracts and fail-closed controller boundaries where practical; it does not falsely mark these controls implemented or generate one universal pipeline for every stack.
 
 The incident-service example supplies a detailed, clearly labelled scripted documentation fixture and reproducible validation scripts. Production gaps are intentionally visible, and `docs check` correctly fails on them.

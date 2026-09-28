@@ -1,6 +1,6 @@
-# Project lifecycle, version 0.2.0
+# Project lifecycle
 
-Vega SDD stores specifications, human-readable designs, task history and change/commit links in `.sdd/`. Version 0.2.0 adds approved execution contracts so the same controller can supervise an application, library, command-line tool, data pipeline, infrastructure repository or mixed monorepo without claiming they share a build/deploy mechanism. The local controller is a reference implementation; hosting, toolchain and runtime policies remain project-specific.
+Vega SDD 0.4.0 stores specifications, human-readable designs, task history, evidence, and change/commit links in `.sdd/`. Approved execution contracts let the same controller supervise an application, library, command-line tool, data pipeline, ML or infrastructure repository, mobile/desktop system, documentation project, or mixed monorepo without pretending they share one build/deploy mechanism. Hosting, toolchain, runtime, and application safety remain project-specific.
 
 ## Greenfield and brownfield onboarding
 
@@ -13,7 +13,9 @@ sdd project setup
 # Or review one file and import it:
 sdd project configure --file workspace-policy.yaml
 sdd repo scaffold --owner @your-org/your-team
-git add .
+git status --short
+git add -A
+git status --short
 git commit -m "Approve project baseline"
 sdd repo branch feature-scope
 sdd start
@@ -28,7 +30,7 @@ For existing code, use `sdd init --project-kind existing`; keep its existing REA
 
 Commands use argument arrays, per-command timeouts and declared required environment-variable names. Never put secrets in policy argv. Declared variable values are redacted from retained command output, though this is not a general-purpose secret scanner. `run_at: release` marks integration checks that cannot run during early greenfield tasks; full `project check`, CI and release qualification include them. Only a fresh full check of the exact current source and approved policy qualifies PR publication or a release. Generated `.sdd/ci` files are part of source evidence when committed; other controller projections are excluded. Configure project-specific checks for compatibility, performance, security, licenses, SBOM, accessibility, replay, evaluation, hardware and migration as appropriate.
 
-Human documentation remains the v0.1.2 contract: system overview, HLD/LLD, database/API design, security, operations, test plan, contributing and release plan. The existing-system report distinguishes observed behavior, desired changes and unknowns. Inapplicability must be explained rather than filled with fabricated content. `sdd docs check` reports structural gaps, not independent architectural approval. `.sdd/CHANGELOG.md` and spec snapshots/diffs show task/intent changes and explicit commit links; use `sdd link-commit` for accurate attribution.
+Human documentation covers the system overview, HLD/LLD, database/API design, security, operations, test plan, contributing guidance, and release plan. The existing-system report distinguishes observed behavior, desired changes, and unknowns. Inapplicability must be explained rather than filled with fabricated content. `sdd docs check` reports structural gaps, not independent architectural approval. `.sdd/CHANGELOG.md` and spec snapshots/diffs show task/intent changes and explicit commit links; use `sdd link-commit` for accurate attribution.
 
 ## Branch strategy, review and CI
 
