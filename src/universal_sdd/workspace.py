@@ -133,7 +133,7 @@ def capability_hash(root):
     """Bind approved execution to the agent instructions, roles, and skills it will load."""
     root=Path(root);h=hashlib.sha256()
     candidates=[]
-    for name in ('.mcp.json','.cursor/mcp.json','.cursorignore','.cursorindexingignore','.github/copilot-instructions.md'):
+    for name in ('.mcp.json','.cursor/mcp.json','.cursorignore','.cursorindexingignore','.geminiignore','.github/copilot-instructions.md'):
         path=root/name
         if path.exists():candidates.append(path)
     for pattern in (

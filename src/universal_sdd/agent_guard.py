@@ -99,7 +99,7 @@ def files(root,patterns):
             '.sdd-controller.lock', '.sdd', '.agents', '.codex', '.claude',
             '.gemini',
             '.cursor/agents', '.cursor/rules', '.cursor/mcp.json', '.cursorignore',
-            '.cursorindexingignore', '.mcp.json', '.github/copilot-instructions.md',
+            '.cursorindexingignore', '.geminiignore', '.mcp.json', '.github/copilot-instructions.md',
             '.github/agents', '.github/skills', '.github/hooks', '.github/prompts',
             '.github/copilot',
         }

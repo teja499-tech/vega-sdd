@@ -69,7 +69,7 @@ _VIEW_MAX_BYTES = 128 * 1024 * 1024
 _VIEW_MAX_FILE_BYTES = 4 * 1024 * 1024
 _INSTRUCTION_ROOTS = {".agents", ".codex", ".claude", ".cursor", ".gemini", ".git", ".sdd"}
 _INSTRUCTION_FILES = {
-    "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md",
+    "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".geminiignore", ".github/copilot-instructions.md",
 }
 
 

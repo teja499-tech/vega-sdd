@@ -117,6 +117,7 @@ def test_real_agent_init_prints_complete_next_steps(demo_repo, monkeypatch):
         demo_repo / ".github" / "hooks" / "hooks.json",
         demo_repo / ".github" / "copilot" / "settings.json",
         demo_repo / ".gemini" / "settings.json",
+        demo_repo / ".geminiignore",
     ]
     for provider_file in provider_files:
         provider_file.parent.mkdir(parents=True, exist_ok=True)
