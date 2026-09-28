@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If Vega SDD supports your work, please cite the project using this metadata."
+title: "Vega SDD"
+abstract: "A repository-owned project lifecycle framework for spec-driven development with AI coding agents."
+type: software
+authors:
+  - family-names: "Nalluri"
+    given-names: "Teja"
+    alias: "teja499-tech"
+repository-code: "https://github.com/teja499-tech/vega-sdd"
+url: "https://github.com/teja499-tech/vega-sdd"
+version: 0.4.0
+date-released: 2026-09-27
+license: Apache-2.0

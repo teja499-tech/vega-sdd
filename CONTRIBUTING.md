@@ -2,6 +2,8 @@
 
 Thanks for improving the framework. Please open an issue before a large behavior or schema change so the scope and compatibility path can be discussed.
 
+All participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md). Usage questions belong in the support channels described in [SUPPORT.md](SUPPORT.md); security findings must follow [SECURITY.md](SECURITY.md).
+
 ## Local setup
 
 ```bash
@@ -24,7 +26,7 @@ The mock adapter makes framework tests deterministic. Real Cursor, Codex and Cla
 4. Link the issue or spec when one exists. Describe affected project kinds, migration and rollback considerations, and any agent-adapter assumptions.
 5. Request review. A reviewer should inspect spec compatibility, state recovery and evidence semantics as well as the implementation. Merge after required checks and reviews pass.
 
-Maintainers must configure branch protection and review rules in GitHub. A YAML workflow alone does not enforce a branch policy.
+The `main` branch is protected. Changes must arrive through a pull request, pass the required Python 3.11 and 3.12 checks, resolve review conversations, and use a squash or rebase merge. Force-pushes and branch deletion are blocked. Repository rules, not workflow YAML alone, enforce this policy.
 
 ## Design principles
 

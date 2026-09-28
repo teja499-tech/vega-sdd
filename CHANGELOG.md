@@ -4,6 +4,8 @@ This file summarizes human-visible changes. Individual project specifications an
 
 ## [0.4.0] - 2026-09-27
 
+- Add named project ownership and release-ready community metadata: NOTICE attribution, citation data, support and conduct policies, CODEOWNERS, dependency updates, security guidance, and release-workflow hardening.
+- Add official light-theme project artwork and a public acknowledgements page covering ECC design inspiration, optional Graphify/Headroom integrations, open-source foundations, and contributors.
 - Reorganize documentation around executable user journeys: add ChatGPT/Claude-assisted PRD discovery, greenfield/brownfield/defect/change/recovery/monorepo/delivery recipes, an exact CLI command reference, current sample output, a documentation index, and 0.4.0 verification evidence.
 - Add a discoverable capability registry: tasks can name up to eight safe project/domain skills, routing metadata selects risk-specific runbooks, and context packs include developer/QA plus specialist role contracts through progressive disclosure.
 - Add reliability, performance, E2E, migration-safety, and agent-system runbooks inspired by ECC's strongest composable-skill patterns; keep lifecycle authority and permissions in the controller.
