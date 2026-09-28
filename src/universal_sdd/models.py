@@ -82,6 +82,7 @@ class SDDConfig(BaseModel):
     allow_unrestricted_agent: bool = False
     review_agent: AgentName | None = None
     enable_headroom: bool = True
+    max_review_files: int = 15
 
 
 class ArchitectureOption(BaseModel):

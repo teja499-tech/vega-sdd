@@ -117,6 +117,9 @@ def refresh_knowledge_graph(paths: SDDPaths, *, timeout: int = 600) -> dict:
     }
 
 
+_ID_TOKEN = re.compile(r"^(?:REQ|TASK|ARCH|ADR|FEAT|F)[-_]?\d+", re.I)
+
+
 def search_trace_corpus(root: Path, question: str, *, limit: int = 2500) -> str:
     """Deterministic keyword search of the SDD traceability corpus."""
     corpus = corpus_path(root)
@@ -125,30 +128,49 @@ def search_trace_corpus(root: Path, question: str, *, limit: int = 2500) -> str:
     tokens = [tok for tok in re.findall(r"[A-Za-z0-9_./-]+", question or "") if len(tok) >= 3]
     if not tokens:
         return ""
-    hits: list[str] = []
+    id_tokens = [tok for tok in tokens if _ID_TOKEN.match(tok)]
+    id_hits: list[str] = []
+    other: list[str] = []
     for line in corpus.read_text(encoding="utf-8").splitlines():
         lowered = line.lower()
         if any(tok.lower() in lowered for tok in tokens):
-            hits.append(line)
-    return "\n".join(hits)[:limit]
+            if id_tokens and any(tok.lower() in lowered for tok in id_tokens):
+                id_hits.append(line)
+            else:
+                other.append(line)
+    kept = list(id_hits)
+    text = "\n".join(kept)
+    for line in other:
+        candidate = f"{text}\n{line}" if text else line
+        if len(candidate) > limit:
+            break
+        text = candidate
+    if not text:
+        text = "\n".join(id_hits)
+    return text[:limit]
 
 
 def query_knowledge_graph(root: Path, question: str, *, limit: int = 4000, timeout: int = 90) -> str:
-    parts: list[str] = []
+    code_text = ""
     if graphify_installed() and graph_json(root).exists():
         code, output = run_graphify(root, ["query", question], timeout=timeout)
         if code == 0 and output.strip():
-            parts.append("# Code graph\n" + output.strip())
-    corpus = search_trace_corpus(root, question)
+            code_text = output.strip()
+    corpus_budget = min(2500, max(1200, (limit * 3) // 5))
+    code_budget = max(400, limit - corpus_budget - 48)
+    corpus = search_trace_corpus(root, question, limit=corpus_budget)
     if not corpus and not corpus_path(root).exists():
         try:
             write_trace_corpus(SDDPaths(root))
         except Exception:
             pass
-        corpus = search_trace_corpus(root, question)
+        corpus = search_trace_corpus(root, question, limit=corpus_budget)
+    parts: list[str] = []
     if corpus:
-        parts.append("# Traceability corpus\n" + corpus)
-    return "\n\n".join(parts)[:limit]
+        parts.append("# Traceability corpus\n" + corpus[:corpus_budget])
+    if code_text:
+        parts.append("# Code graph\n" + code_text[:code_budget])
+    return "\n\n".join(parts)
 
 
 def graph_context(paths: SDDPaths, question: str = "architecture and requirements") -> str:

@@ -1,5 +1,6 @@
 """Detect controller and Git mutations; this is not an OS sandbox."""
 import fnmatch
+import hashlib
 import json
 import os
 import shutil
@@ -106,6 +107,48 @@ def changed_since(root: Path, before: dict) -> list[str]:
     return sorted(name for name in names if before.get(name) != after.get(name))
 
 
+def snapshot_hashes(snapshot: dict) -> dict[str, str]:
+    return {name: hashlib.sha256(content or b"").hexdigest() for name, content in snapshot.items()}
+
+
+def persist_task_baseline(paths, task_id: str, snapshot: dict) -> None:
+    folder = paths.runtime / "task-baselines"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{task_id}.json").write_text(
+        json.dumps(snapshot_hashes(snapshot), indent=2, sort_keys=True),
+        encoding="utf-8",
+    )
+
+
+def load_task_baseline(paths, task_id: str) -> dict[str, str] | None:
+    path = paths.runtime / "task-baselines" / f"{task_id}.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return data if isinstance(data, dict) else None
+
+
+def clear_task_baseline(paths, task_id: str) -> None:
+    (paths.runtime / "task-baselines" / f"{task_id}.json").unlink(missing_ok=True)
+
+
+def changed_since_hashes(root: Path, hashes: dict[str, str]) -> list[str]:
+    after = snapshot_hashes(workspace_snapshot(root))
+    return sorted(name for name in set(hashes) | set(after) if hashes.get(name) != after.get(name))
+
+
+def restore_git_state(root: Path, original: tuple) -> None:
+    """Restore HEAD/index without rewriting working-tree files."""
+    head, ref, _cached = original
+    head_text = head.decode().strip() if isinstance(head, (bytes, bytearray)) else str(head).strip()
+    ref_text = ref.decode().strip() if isinstance(ref, (bytes, bytearray)) else str(ref).strip()
+    if head_text:
+        subprocess.run(["git", "update-ref", "HEAD", head_text], cwd=root, capture_output=True)
+    if ref_text:
+        subprocess.run(["git", "symbolic-ref", "HEAD", ref_text], cwd=root, capture_output=True)
+    subprocess.run(["git", "read-tree", "HEAD"], cwd=root, capture_output=True)
+
+
 def restore_workspace(root: Path, snapshot: dict) -> list[str]:
     after = workspace_snapshot(root)
     changed: list[str] = []
@@ -155,6 +198,7 @@ def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
                 new=after[journal][len(before.get(journal,b'')):].splitlines()
                 if new and all(json.loads(x).get('event')=='pause_requested' for x in new):changed.remove(journal)
             except (ValueError,TypeError):pass
+        violations=[]
         if changed:
             def regenerable(rel):
                 return rel in {'.sdd/CHANGELOG.md','.sdd/STATUS.md','.sdd/roadmap.md'} or rel.startswith('.sdd/docs/')
@@ -169,7 +213,11 @@ def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
                 elif path.exists():path.unlink()
             material=[p for p in changed if not regenerable(p)]
             if material:
-                raise RuntimeError('Agent modified protected controller files; restored: '+', '.join(material))
+                violations.append('Agent modified protected controller files; restored: '+', '.join(material))
         if source is not None:
             restore_workspace(root, source)
-        if git_state()!=original:raise RuntimeError('Agent changed Git HEAD, branch or index; inspect working tree')
+        if git_state()!=original:
+            restore_git_state(root, original)
+            violations.append('Agent changed Git HEAD, branch or index; inspect working tree')
+        if violations:
+            raise RuntimeError('; '.join(violations))

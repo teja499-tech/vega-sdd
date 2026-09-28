@@ -46,15 +46,21 @@ class ContextPack(BaseModel):
             "files": "Working set:\n" + _bounded_json(self.files[:MAX_FILES], 1500),
             "tests": "Related tests:\n" + _bounded_json(self.related_tests, 800),
             "adrs": "Relevant ADRs: " + (", ".join(self.adr_ids) or "none"),
-            "changed": "Changed files this task (tracked + untracked):\n" + _bounded_json(self.changed_files or self.files, 1200),
+            "changed": "Changed files this task (tracked + untracked):\n" + (
+                json.dumps(self.changed_files, indent=2) if self.changed_files else _bounded_json(self.files, 1200)
+            ),
             "oos": "Out-of-scope writes (reviewer must approve or fail):\n" + _bounded_json(self.out_of_scope, 800),
             "contracts": "Feature contracts:\n" + _truncate_field(self.contracts or "none recorded", 1500),
             "spec": "Spec excerpt:\n" + _truncate_field(self.spec_excerpt or "none", 2000),
             "graph": "Graphify subgraph:\n" + _truncate_field(self.graph_excerpt or "No scoped subgraph yet. Run sdd graph refresh.", 1500),
             "findings": "Last review findings:\n" + _bounded_json(self.last_findings, RESERVED_FINDINGS_CHARS),
         }
-        shrinkable = ["spec", "graph", "contracts", "files", "changed", "oos", "tests", "skills"]
+        shrinkable = ["spec", "graph", "contracts", "files", "oos", "tests", "skills"]
         reserved = {"acceptance", "findings"}
+        if self.changed_files:
+            reserved.add("changed")
+        else:
+            shrinkable.insert(3, "changed")
         body = _join_sections(sections)
         while len(body) > limit and shrinkable:
             key = shrinkable.pop(0)
@@ -63,7 +69,18 @@ class ContextPack(BaseModel):
             sections[key] = _truncate_field(sections[key], max(80, len(sections[key]) // 2))
             body = _join_sections(sections)
         if len(body) > limit:
-            body = _join_sections({k: sections[k] for k in ("intro", "skills", "acceptance", "findings", "oos")})
+            keep = ("intro", "skills", "acceptance", "findings", "oos")
+            if self.changed_files:
+                keep = (*keep, "changed")
+            body = _join_sections({k: sections[k] for k in keep})
+        if self.changed_files:
+            missing = [name for name in self.changed_files if name not in sections["changed"]]
+            if missing:
+                raise RuntimeError(
+                    "Review pack omitted changed files: "
+                    + ", ".join(missing)
+                    + ". Split the task or raise max_review_files."
+                )
         return body
 
 
@@ -260,9 +277,22 @@ def rebuild_review_pack(
         if rel.startswith(".sdd/") or rel.startswith(".git/"):
             continue
         cleaned.append(rel)
+    try:
+        from .storage import load_config
+        limit = max(1, int(load_config(paths).max_review_files))
+    except Exception:
+        limit = MAX_FILES
+    if len(cleaned) > limit:
+        raise RuntimeError(
+            f"Task changed {len(cleaned)} files; review limit is {limit}. "
+            "Split the task or set max_review_files in .sdd/config.yaml."
+        )
     out_of_scope = [rel for rel in cleaned if rel not in declared]
-    files = list(dict.fromkeys([*cleaned, *base.files]))[:MAX_FILES]
-    tests = list(dict.fromkeys([rel for rel in files if "test" in rel] + base.related_tests))[:MAX_FILES]
+    extras = [rel for rel in base.files if rel not in cleaned]
+    files = list(dict.fromkeys([*cleaned, *extras]))
+    if len(files) > max(limit, len(cleaned)):
+        files = list(dict.fromkeys([*cleaned, *extras]))[: max(limit, len(cleaned))]
+    tests = list(dict.fromkeys([rel for rel in files if "test" in rel] + base.related_tests))
     return base.model_copy(
         update={
             "skill": skill,
@@ -277,4 +307,8 @@ def rebuild_review_pack(
 
 
 def persist_working_set(task: Task, pack: ContextPack, extra: list[str] | None = None) -> None:
-    task.working_set = list(dict.fromkeys([*pack.files, *(extra or [])]))[:MAX_FILES]
+    names = list(dict.fromkeys([*pack.files, *(extra or [])]))
+    if pack.changed_files:
+        task.working_set = names
+    else:
+        task.working_set = names[:MAX_FILES]

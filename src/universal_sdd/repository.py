@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -60,6 +61,9 @@ PRIORITY_DIRS = {
     "architecture",
 }
 
+EVIDENCE_CHARS = 360
+MAX_EVIDENCE = 10
+
 
 def _priority(rel: str) -> tuple[int, str]:
     path = Path(rel)
@@ -73,8 +77,24 @@ def _priority(rel: str) -> tuple[int, str]:
     return (3, rel)
 
 
+def _excerpt(root: Path, rel: str) -> str | None:
+    path = root / rel
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    digest = hashlib.sha256(data).hexdigest()[:16]
+    if len(data) > 200_000:
+        return f"### {rel}\nsha256={digest} omitted as too large ({len(data)} bytes)"
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return f"### {rel}\nsha256={digest} binary {len(data)} bytes"
+    return f"### {rel}\nsha256={digest} ({len(text)} chars)\n{text[:EVIDENCE_CHARS]}"
+
+
 def summarize_repository(root: Path, max_files: int = 200) -> str:
-    """Deterministic brownfield pack: manifests, entrypoints, then a bounded file list."""
+    """Deterministic brownfield pack: excerpts from evidence, then a bounded file list."""
     ignored = {".git", ".sdd", ".venv", "node_modules", "dist", "build", "__pycache__", "graphify-out"}
     files: list[str] = []
     for path in root.rglob("*"):
@@ -100,14 +120,42 @@ def summarize_repository(root: Path, max_files: int = 200) -> str:
         if graph.exists()
         else "Graphify graph: not built. Run `sdd graph refresh` after installing graphify."
     )
+    graph_query = ""
+    try:
+        from .graphify_index import query_knowledge_graph
+        graph_query = query_knowledge_graph(root, "architecture requirements entrypoints")
+    except Exception:
+        graph_query = ""
+    evidence = [rel for rel in selected if _priority(rel)[0] <= 2][:MAX_EVIDENCE]
+    excerpts: list[str] = []
+    omitted_evidence: list[str] = []
+    for rel in evidence:
+        text = _excerpt(root, rel)
+        if text:
+            excerpts.append(text)
+        else:
+            omitted_evidence.append(rel)
     lines = [
         git,
         "",
         graph_note,
         "",
-        "Priority evidence (manifests, entrypoints, architecture/infra first):",
+        "Pre-init Graphify query:",
+        graph_query or "No graph/corpus hit. Do not invent architecture from filenames alone.",
+        "",
+        "Evidence excerpts (size-capped; omitted paths are unresolved boundaries):",
+        *excerpts,
+    ]
+    if omitted_evidence:
+        lines += ["", "Unreadable or oversized evidence:", *[f"- {name}" for name in omitted_evidence]]
+    lines += [
+        "",
+        "Priority inventory (manifests, entrypoints, architecture/infra first):",
         *[f"- {name}" for name in selected],
     ]
     if len(files) > max_files:
-        lines.append(f"- … {len(files) - max_files} additional files omitted")
+        lines.append(
+            f"- … {len(files) - max_files} additional files omitted. "
+            "Treat omitted paths as explicit questions, not inferred architecture."
+        )
     return "\n".join(lines)

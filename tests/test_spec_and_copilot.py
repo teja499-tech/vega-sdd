@@ -154,6 +154,7 @@ def test_token_estimate_and_gemini_copilot_commands(tmp_path: Path):
     assert "--allow-tool" in cop
     assert "write" in cop
     assert "--silent" in cop
+    assert "--no-ask-user" in cop
 
 
 def test_mcp_tool_catalog():

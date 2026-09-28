@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .adapters import get_adapter
-from .artifacts import project_context, write_architecture, write_spec_bundle
+from .artifacts import project_context, projection_transaction, write_architecture, write_spec_bundle
 from .journal import Journal
 from .json_utils import extract_json, parse_structured
 from .models import (
@@ -27,7 +27,7 @@ from .models import (
     SpecBundle,
 )
 from .clarifications import assert_start_ready
-from .context_pack import build_context_pack, persist_working_set, rebuild_review_pack
+from .context_pack import build_context_pack, persist_working_set, rebuild_review_pack, skills_for_phase
 from .project_graph import refresh_graph
 from .prompts import change_analysis_prompt, implement_task_prompt, repair_task_prompt, review_task_prompt, reconcile_change_prompt
 from .review_policy import apply_review_policy, review_allows_progress
@@ -115,6 +115,50 @@ def _append_verification(paths: SDDPaths, result: VerificationResult) -> None:
     rows = load_yaml(paths.verification_file, []) or []
     rows.append(result.model_dump(mode="json"))
     dump_yaml(paths.verification_file, rows)
+
+
+def _verify_feature(root, paths, config, feature, task, workspace, journal, state, features) -> bool:
+    """Controller-owned feature verification. verify-feature is not an agent skill invocation."""
+    from .skill_library import lifecycle_skill
+    from .workspace import run_checks
+
+    skill = lifecycle_skill("verify")
+    if config.test_command:
+        suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
+        _append_verification(paths, suite)
+        journal.append(
+            "feature_suite",
+            feature=feature.id,
+            status=suite.status,
+            skill=skill,
+            executor="controller",
+        )
+        if suite.status == "fail":
+            task.status = ItemStatus.failed
+            feature.status = ItemStatus.in_progress
+            _save_features(paths, features)
+            state.run_status = RunStatus.blocked
+            save_project_state(paths, state)
+            journal.append("feature_suite_failed", feature=feature.id, evidence=suite.summary)
+            return False
+    if workspace:
+        release = run_checks(root, phase="feature")
+        journal.append(
+            "feature_workspace_checks",
+            feature=feature.id,
+            passed=release.get("passed"),
+            skill=skill,
+            executor="controller",
+        )
+        if not release.get("passed"):
+            task.status = ItemStatus.failed
+            feature.status = ItemStatus.in_progress
+            _save_features(paths, features)
+            state.run_status = RunStatus.blocked
+            save_project_state(paths, state)
+            journal.append("feature_suite_failed", feature=feature.id, evidence=release)
+            return False
+    return True
 
 
 @single_writer
@@ -215,8 +259,21 @@ def run_development(
             pack.graph_excerpt = compress_for_prompt(paths, pack.graph_excerpt, label=f"{task.id}-graph")
             persist_working_set(task, pack)
             protected = workspace.protected_paths if workspace else []
-            from .agent_guard import changed_since, workspace_snapshot
-            before_tree = workspace_snapshot(root)
+            from .agent_guard import (
+                changed_since_hashes,
+                clear_task_baseline,
+                load_task_baseline,
+                persist_task_baseline,
+                snapshot_hashes,
+                workspace_snapshot,
+            )
+            stored_baseline = load_task_baseline(paths, task.id)
+            if already_implemented and stored_baseline:
+                before_hashes = stored_baseline
+            else:
+                before_tree = workspace_snapshot(root)
+                persist_task_baseline(paths, task.id, before_tree)
+                before_hashes = snapshot_hashes(before_tree)
 
             if not already_implemented:
                 prompt = implement_task_prompt(task, feature, root, pack)
@@ -266,7 +323,7 @@ def run_development(
                 if findings:
                     review_data = apply_review_policy({"status": "fail", "findings": findings, "summary": "Deterministic checks failed"})
                 else:
-                    changed = changed_since(root, before_tree)
+                    changed = changed_since_hashes(root, before_hashes)
                     pack = rebuild_review_pack(paths, task, feature, changed, pack)
                     persist_working_set(task, pack, extra=changed)
                     review_prompt = review_task_prompt(
@@ -297,10 +354,11 @@ def run_development(
                     break
                 findings = review_data.get("findings", [])
                 task.last_findings = [f for f in findings if isinstance(f, dict)]
-                pack = pack.model_copy(update={"last_findings": task.last_findings})
+                skill, extra = skills_for_phase("repair", task)
+                pack = pack.model_copy(update={"skill": skill, "extra_skills": extra, "last_findings": task.last_findings})
                 journal.append("review_failed", task=task.id, findings=findings)
                 repair_count += 1
-                journal.append("repair_started", task=task.id, attempt=repair_count)
+                journal.append("repair_started", task=task.id, attempt=repair_count, skill=skill)
                 repair_prompt = repair_task_prompt(task, findings, pack)
                 repair = _agent_call(
                     adapter, repair_prompt, paths=paths, state=state, task_id=task.id, phase="repair",
@@ -337,29 +395,11 @@ def run_development(
             task.evidence.extend([*check_evidence, review_result.id])
             if all(t.status == ItemStatus.verified for t in feature.tasks):
                 feature.status = ItemStatus.verified
-                if config.test_command:
-                    from .skill_library import lifecycle_skill
-                    suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
-                    _append_verification(paths, suite)
-                    journal.append("feature_suite", feature=feature.id, status=suite.status, skill=lifecycle_skill("verify"))
-                    if suite.status == "fail":
-                        task.status = ItemStatus.failed
-                        feature.status = ItemStatus.in_progress
-                        _save_features(paths, features)
-                        state.run_status = RunStatus.blocked
-                        save_project_state(paths, state)
-                        journal.append("feature_suite_failed", feature=feature.id, evidence=suite.summary)
-                        break
-                if workspace:
-                    release = run_checks(root, phase="feature")
-                    if not release.get("passed"):
-                        task.status = ItemStatus.failed
-                        feature.status = ItemStatus.in_progress
-                        _save_features(paths, features)
-                        state.run_status = RunStatus.blocked
-                        save_project_state(paths, state)
-                        journal.append("feature_suite_failed", feature=feature.id, evidence=release)
-                        break
+                if not _verify_feature(
+                    root, paths, config, feature, task, workspace, journal, state, features
+                ):
+                    break
+            clear_task_baseline(paths, task.id)
             _save_features(paths, features)
             refresh_graph(paths)
             journal.append("task_verified", task=task.id, evidence=review_result.id)
@@ -630,8 +670,9 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
         report = validate_traceability(staged)
         if not report.ok:
             raise RuntimeError("Change rejected before mutation: " + "; ".join(report.errors))
-    write_architecture(paths, decisions)
-    write_spec_bundle(paths, bundle, preserve_verification=True)
+    with projection_transaction(paths):
+        write_architecture(paths, decisions)
+        write_spec_bundle(paths, bundle, preserve_verification=True)
     state = load_project_state(paths)
     state.run_status = RunStatus.ready
     state.current_feature = None

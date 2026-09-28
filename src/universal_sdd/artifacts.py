@@ -1,16 +1,76 @@
 from __future__ import annotations
 
+import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 
 from .models import ArchitectureDecision, SpecBundle
 from .storage import SDDPaths, dump_yaml
+
+_PROJECTION_TX = ContextVar("sdd_projection_tx", default=False)
+
+_SKIP_SDD_DIRS = {"runtime", "journal", "evidence", "recovery", "artifacts"}
+_SKIP_STATE_FILES = {"project.yaml"}
 
 
 def _md_list(items: list[str]) -> str:
     return "\n".join(f"- {x}" for x in items) if items else "- None"
 
 
-def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -> None:
+def _canonical_files(paths: SDDPaths) -> dict[str, bytes]:
+    files: dict[str, bytes] = {}
+    roots = [paths.sdd]
+    corpus = paths.root / "graphify-corpus"
+    if corpus.exists():
+        roots.append(corpus)
+    for base in roots:
+        for folder, dirs, names in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in _SKIP_SDD_DIRS and d != ".git"]
+            for name in names:
+                if name in _SKIP_STATE_FILES and Path(folder).name == "state":
+                    continue
+                path = Path(folder) / name
+                if not path.is_file():
+                    continue
+                rel = path.relative_to(paths.root).as_posix()
+                files[rel] = path.read_bytes()
+    return files
+
+
+def _restore_canonical(paths: SDDPaths, snapshot: dict[str, bytes]) -> None:
+    current = _canonical_files(paths)
+    for rel, content in snapshot.items():
+        path = paths.root / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+    for rel in current:
+        if rel in snapshot:
+            continue
+        path = paths.root / rel
+        if path.is_file():
+            path.unlink()
+
+
+@contextmanager
+def projection_transaction(paths: SDDPaths):
+    """Stage-or-rollback journal for every canonical projection."""
+    if _PROJECTION_TX.get():
+        yield
+        return
+    snapshot = _canonical_files(paths)
+    token = _PROJECTION_TX.set(True)
+    try:
+        yield
+    except Exception:
+        _restore_canonical(paths, snapshot)
+        raise
+    finally:
+        _PROJECTION_TX.reset(token)
+
+
+def _render_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -> None:
     dump_yaml(paths.architecture_decisions_file, decisions)
     index_lines = ["# Architecture Decisions", ""]
     for decision in decisions:
@@ -37,7 +97,12 @@ def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -
     (paths.architecture / "decisions.md").write_text("\n".join(index_lines) + "\n", encoding="utf-8")
 
 
-def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -> None:
+    with projection_transaction(paths):
+        _render_architecture(paths, decisions)
+
+
+def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
     from .spec_quality import assert_spec_quality
     assert_spec_quality(bundle)
     product = bundle.product
@@ -121,6 +186,11 @@ def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verificat
     snapshot_specs(paths)
     render_docs(paths)
     render_history(paths)
+
+
+def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+    with projection_transaction(paths):
+        _render_spec_bundle(paths, bundle, preserve_verification=preserve_verification)
 
 
 def project_context(paths: SDDPaths, max_chars: int = 30000) -> str:

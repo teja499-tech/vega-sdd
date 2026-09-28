@@ -258,8 +258,10 @@ Verification: {json.dumps(task.verification)}
 
 def repair_task_prompt(task: Task, findings: list[dict], pack: ContextPack | None = None) -> str:
     pack_text = pack.render() if pack else "No context pack supplied."
+    skill = pack.skill if pack else lifecycle_skill("repair")
     return f"""
 You are the implementation agent repairing a failed SDD review.
+Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
 Fix only the blocking implementation defects below without changing approved requirements or architecture.
 Use the context pack. Do not walk the repository. Run the listed tests after repair.
 Do not edit `.sdd/`, `.agents/`, `AGENTS.md`, or vendor agent adapter directories.

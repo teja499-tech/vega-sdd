@@ -223,7 +223,7 @@ sdd clarify Q1 --answer "Owners may export their own workspace only."
 sdd start --accept-deferred
 ```
 
-`--accept-deferred` only signs an item that already has an explicit default or option ID. For architecture, that writes the recommended option onto the decision and ADR. A deferred question with no default still blocks start.
+`--accept-deferred` only signs an item that already has an explicit default or option ID. Placeholder answers such as `Deferred` cannot resolve architecture. All defaults are validated first; a missing default rolls nothing back because nothing was written. For architecture, a valid default writes the recommended option onto the decision and ADR.
 
 A failed task stays out of the scheduler until you retry it. `--keep-code` requeues verification without discarding the working tree:
 
@@ -308,6 +308,7 @@ Initialization captures lightweight repo/Git context and supplies it to product/
 - `lint_command`
 - `typecheck_command`
 - `allow_unrestricted_agent` (default false; opt-in for Cursor `--force`, Gemini `--yolo`, Copilot `--allow-all`)
+- `max_review_files` (default 15; a larger change set fails closed until the task is split or the owner raises the bound)
 
 The approval flags document project policy. V1's CLI enforces approval for classified spec/requirement/architecture mutation. Unrestricted agent flags stay off unless the owner sets the config field or passes `sdd start --allow-unrestricted` for that process. Isolate that run; the git guard cannot prevent secret reads or network use.
 

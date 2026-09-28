@@ -16,6 +16,16 @@ This file summarizes human-visible changes. Individual project specifications an
 - Graphify queries always merge a deterministic search of `graphify-corpus/sdd-traceability.md` with the code graph.
 - Headroom runs in a timed subprocess, trips a circuit after repeated failures, and can be disabled with `enable_headroom: false` or `SDD_DISABLE_HEADROOM=1`.
 - `write_spec_bundle` is an artifact projection and no longer resets lifecycle state.
+- Architecture answers reject placeholders; `--accept-deferred` validates every default before committing decisions and clarifications together.
+- Canonical artifact writes use a rollback journal so a failed `apply_change` cannot leave a half-written spec.
+- Successful init saves ready state before publishing `STATUS.md`.
+- Read-only guards restore protected files, source, and Git metadata before raising.
+- Pre-task file baselines persist across crash recovery so review sees files created before `task_implemented`.
+- Repair prompts load the repair/implementation skill; `verify-feature` is a controller contract, not an agent invocation.
+- Graphify reserves a corpus budget so a large code-graph response cannot drop REQ/TASK/ADR hits.
+- Copilot restricted runs add `--no-ask-user` and scoped `shell(<approved-check>)` tools; generic shell stays off.
+- Brownfield init sends size-capped evidence excerpts, hashes, a pre-init Graphify query, and an omitted-file note.
+- Review fails closed when the actual change set exceeds `max_review_files` instead of silently dropping files.
 
 
 - Removed per-task and per-run token caps. A run records raw versus compressed size in `.sdd/state/compression-ledger.yaml` and does not pause because an estimate crossed a budget.

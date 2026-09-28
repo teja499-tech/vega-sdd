@@ -310,13 +310,13 @@ def init(
             for e in report.errors:
                 console.print(f"  • {e}")
             _fail_init("Traceability validation failed.", 2)
-        publish_status(paths)
         Journal(paths.event_log).append("project_initialized", agent=agent.value, requirements=len(bundle.requirements), features=len(bundle.features))
         ready = load_project_state(paths)
         ready.initialized = True
         ready.run_status = RunStatus.ready
         ready.artifacts_generated = True
         save_project_state(paths, ready)
+        publish_status(paths)
         finished = True
 
         from .documentation import check_docs

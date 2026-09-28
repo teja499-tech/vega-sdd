@@ -140,22 +140,26 @@ def unresolved_material(paths: SDDPaths) -> list[Clarification]:
     return [item for item in load_clarifications(paths) if item.status in {"open", "deferred"}]
 
 
-def _write_decision(paths: SDDPaths, decision_id: str, selected: str, reason: str) -> ArchitectureDecision:
-    from .artifacts import write_architecture
-
-    decisions = load_decisions(paths)
-    target = None
+def _select_decision(
+    decisions: list[ArchitectureDecision], decision_id: str, selected: str, reason: str
+) -> ArchitectureDecision:
     for decision in decisions:
         if decision.id == decision_id:
             decision.selected = selected
             decision.selected_reason = reason
             decision.status = DecisionStatus.selected
-            target = decision
-            break
-    if target is None:
-        raise ValueError(f"Unknown architecture decision: {decision_id}")
-    write_architecture(paths, decisions)
-    return target
+            return decision
+    raise ValueError(f"Unknown architecture decision: {decision_id}")
+
+
+def _commit_decisions_and_clarifications(
+    paths: SDDPaths, decisions: list[ArchitectureDecision], items: list[Clarification]
+) -> None:
+    from .artifacts import projection_transaction, write_architecture
+
+    with projection_transaction(paths):
+        write_architecture(paths, decisions)
+        save_clarifications(paths, items)
 
 
 def answer_clarification(paths: SDDPaths, clarification_id: str, answer: str) -> Clarification:
@@ -163,23 +167,32 @@ def answer_clarification(paths: SDDPaths, clarification_id: str, answer: str) ->
     target = None
     for item in items:
         if item.id == clarification_id:
-            item.answer = answer
-            item.status = "answered"
-            if not _placeholder(answer):
-                item.default_option = item.default_option or answer.strip()
             target = item
             break
     if target is None:
         raise ValueError(f"Unknown clarification: {clarification_id}")
+    if target.source == "architecture" and _placeholder(answer):
+        raise ValueError(
+            f"Architecture decision {target.id} cannot be resolved with a placeholder answer. "
+            "Choose a real option or record an explicit default."
+        )
+    target.answer = answer
+    target.status = "answered"
+    if not _placeholder(answer):
+        target.default_option = target.default_option or answer.strip()
     if target.source == "architecture":
-        _write_decision(paths, target.id, answer.strip(), "Answered via sdd clarify")
-    save_clarifications(paths, items)
+        decisions = load_decisions(paths)
+        _select_decision(decisions, target.id, answer.strip(), "Answered via sdd clarify")
+        _commit_decisions_and_clarifications(paths, decisions, items)
+    else:
+        save_clarifications(paths, items)
     return target
 
 
 def accept_deferred_defaults(paths: SDDPaths) -> list[Clarification]:
-    """Sign deferred items only when an explicit default/option exists. Updates ADRs atomically."""
-    decisions = {d.id: d for d in load_decisions(paths)}
+    """Validate every default first, then commit decisions and clarifications together."""
+    planned_decisions = [d.model_copy(deep=True) for d in load_decisions(paths)]
+    by_id = {d.id: d for d in planned_decisions}
     updated: list[Clarification] = []
     rejected: list[Clarification] = []
     for item in load_clarifications(paths):
@@ -187,47 +200,53 @@ def accept_deferred_defaults(paths: SDDPaths) -> list[Clarification]:
             updated.append(item)
             continue
         if item.source == "architecture":
-            decision = decisions.get(item.id)
+            decision = by_id.get(item.id)
             chosen = (item.default_option or "").strip() or (default_option_for(decision) if decision else None)
-            if not chosen:
+            if not chosen or _placeholder(str(chosen)):
                 rejected.append(item)
                 updated.append(item)
                 continue
-            _write_decision(paths, item.id, chosen, "Accepted deferred default at start")
-            item = item.model_copy(
-                update={
-                    "status": "accepted_default",
-                    "answer": f"Accepted default: {chosen}",
-                    "default_option": chosen,
-                }
+            _select_decision(planned_decisions, item.id, chosen, "Accepted deferred default at start")
+            updated.append(
+                item.model_copy(
+                    update={
+                        "status": "accepted_default",
+                        "answer": f"Accepted default: {chosen}",
+                        "default_option": chosen,
+                    }
+                )
             )
-            updated.append(item)
             continue
         if _placeholder(item.answer) and not item.default_option:
             rejected.append(item)
             updated.append(item)
             continue
         chosen = item.default_option or item.answer.strip()
-        item = item.model_copy(
-            update={
-                "status": "accepted_default",
-                "answer": f"Accepted default: {chosen}",
-                "default_option": chosen,
-            }
+        if _placeholder(chosen):
+            rejected.append(item)
+            updated.append(item)
+            continue
+        updated.append(
+            item.model_copy(
+                update={
+                    "status": "accepted_default",
+                    "answer": f"Accepted default: {chosen}",
+                    "default_option": chosen,
+                }
+            )
         )
-        updated.append(item)
-    save_clarifications(paths, updated)
+    leftover = [d for d in planned_decisions if d.status == DecisionStatus.deferred or not d.selected]
+    if leftover and not rejected:
+        rejected.extend(
+            Clarification(id=d.id, question=d.question, status="deferred", source="architecture")
+            for d in leftover
+        )
     if rejected:
         raise RuntimeError(
             _block_message(rejected)
             + "\n`--accept-deferred` requires an explicit default or option ID; none was recorded."
         )
-    leftover = [d for d in load_decisions(paths) if d.status == DecisionStatus.deferred or not d.selected]
-    if leftover:
-        raise RuntimeError(
-            "Architecture remains unresolved after `--accept-deferred`:\n"
-            + "\n".join(f"- {d.id}: selected={d.selected!r} status={d.status.value}" for d in leftover)
-        )
+    _commit_decisions_and_clarifications(paths, planned_decisions, updated)
     return updated
 
 

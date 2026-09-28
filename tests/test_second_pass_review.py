@@ -23,7 +23,7 @@ from universal_sdd.context_pack import ContextPack, adr_id_from_path, build_cont
 from universal_sdd.graphify_index import query_knowledge_graph, write_trace_corpus
 from universal_sdd.models import AgentCapabilities, AgentName, AgentResult, DecisionStatus, RunStatus, SpecBundle
 from universal_sdd.orchestrator import apply_change, ask_project, run_development
-from universal_sdd.prompts import architecture_prompt, change_analysis_prompt, reconcile_change_prompt, spec_bundle_prompt
+from universal_sdd.prompts import architecture_prompt, change_analysis_prompt, reconcile_change_prompt, repair_task_prompt, spec_bundle_prompt
 from universal_sdd.skill_library import LIFECYCLE_SKILLS, SKILLS, lifecycle_skill
 from universal_sdd.status import load_features
 from universal_sdd.storage import SDDPaths, load_config, load_project_state, load_yaml, save_config, save_project_state
@@ -307,6 +307,9 @@ def test_lifecycle_skills_are_routed():
     assert "create-feature-spec" in spec_bundle_prompt("prd", [])
     assert "spec-drift" in change_analysis_prompt("x", "ctx")
     assert "reconcile" in reconcile_change_prompt("x", "requirement_change", "{}", "[]")
+    pack = ContextPack(task_id="T", feature_id="F", skill="implement-task")
+    assert "implement-task" in repair_task_prompt(task, [], pack)
+    assert "review-task" not in repair_task_prompt(task, [], pack)
 
 
 def test_context_pack_keeps_findings_and_adr_ids(initialized):
@@ -375,6 +378,7 @@ def test_adapter_middle_modes_and_fail_fast(tmp_path):
     gem = GeminiAdapter(tmp_path).build_command("hello", writable=True)
     assert gem[gem.index("--approval-mode") + 1] == "auto_edit"
     cop = CopilotAdapter(tmp_path).build_command("hello", writable=True)
+    assert "--no-ask-user" in cop
     assert cop[cop.index("--allow-tool") + 1] == "write"
     with pytest.raises(RuntimeError, match="cannot write"):
         assert_writable_command("gemini", ["gemini", "-p", "hello"])
@@ -396,3 +400,6 @@ def test_brownfield_summary_prioritizes_manifests(tmp_path):
     assert text.index("pyproject.toml") < text.index("zzz.txt")
     assert text.index("README.md") < text.index("zzz.txt")
     assert "Graphify graph: present" in text
+    assert "sha256=" in text
+    assert "Evidence excerpts" in text
+    assert "Pre-init Graphify query" in text
