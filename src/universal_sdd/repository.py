@@ -67,7 +67,7 @@ MAX_EVIDENCE = 10
 _VIEW_MAX_FILES = 10_000
 _VIEW_MAX_BYTES = 128 * 1024 * 1024
 _VIEW_MAX_FILE_BYTES = 4 * 1024 * 1024
-_INSTRUCTION_ROOTS = {".agents", ".codex", ".claude", ".cursor", ".git", ".sdd"}
+_INSTRUCTION_ROOTS = {".agents", ".codex", ".claude", ".cursor", ".gemini", ".git", ".sdd"}
 _INSTRUCTION_FILES = {
     "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md",
 }
@@ -105,6 +105,10 @@ def materialize_repository_view(source: Path, target: Path) -> str:
             or rel in _INSTRUCTION_FILES
             or path.name in {"AGENTS.md", "CLAUDE.md", "GEMINI.md"}
             or rel.startswith(".github/instructions/")
+            or rel.startswith((
+                ".github/agents/", ".github/skills/", ".github/hooks/",
+                ".github/prompts/", ".github/copilot/",
+            ))
             or lower_name == ".env" or lower_name.startswith(".env.")
             or path.suffix.lower() in {".pem", ".key", ".p12", ".pfx"}
         ):

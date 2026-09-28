@@ -137,9 +137,11 @@ def capability_hash(root):
         path=root/name
         if path.exists():candidates.append(path)
     for pattern in (
-        '.agents/**/*', '.codex/**/*', '.claude/**/*',
+        '.agents/**/*', '.codex/**/*', '.claude/**/*', '.gemini/**/*',
         '.cursor/agents/**/*', '.cursor/rules/**/*',
-        '.github/instructions/**/*.instructions.md',
+        '.github/instructions/**/*.instructions.md', '.github/agents/**/*',
+        '.github/skills/**/*', '.github/hooks/**/*', '.github/prompts/**/*',
+        '.github/copilot/**/*',
         '**/AGENTS.md', '**/CLAUDE.md', '**/GEMINI.md',
     ):
         candidates.extend(sorted(root.glob(pattern)))

@@ -11,6 +11,19 @@ _MAX_SNAPSHOT_FILES = 20_000
 _MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 _MAX_SNAPSHOT_FILE_BYTES = 64 * 1024 * 1024
 
+
+def _snapshot_limit(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} must be a positive integer") from exc
+    if value < 1:
+        raise RuntimeError(f"{name} must be a positive integer")
+    return value
+
 def _source_names(root: Path):
     listing = subprocess.run(
         ['git', 'ls-files', '-co', '--exclude-standard', '-z'],
@@ -84,12 +97,17 @@ def files(root,patterns):
         instruction_name = path.name in {'AGENTS.md', 'CLAUDE.md', 'GEMINI.md'}
         exact = rel in {
             '.sdd-controller.lock', '.sdd', '.agents', '.codex', '.claude',
+            '.gemini',
             '.cursor/agents', '.cursor/rules', '.cursor/mcp.json', '.cursorignore',
             '.cursorindexingignore', '.mcp.json', '.github/copilot-instructions.md',
+            '.github/agents', '.github/skills', '.github/hooks', '.github/prompts',
+            '.github/copilot',
         }
         prefix = rel.startswith((
-            '.sdd/', '.agents/', '.codex/', '.claude/', '.cursor/agents/',
-            '.cursor/rules/', '.github/instructions/',
+            '.sdd/', '.agents/', '.codex/', '.claude/', '.gemini/',
+            '.cursor/agents/', '.cursor/rules/', '.github/instructions/',
+            '.github/agents/', '.github/skills/', '.github/hooks/',
+            '.github/prompts/', '.github/copilot/',
         ))
         return instruction_name or exact or prefix or any(fnmatch.fnmatch(rel,p) for p in patterns)
     for folder,dirs,names in os.walk(root):
@@ -103,6 +121,9 @@ def workspace_snapshot(root: Path) -> dict:
     """Walk the working tree. Git ls-files would hide gitignored and some untracked files."""
     result = {}
     total = 0
+    max_files = _snapshot_limit("SDD_GUARD_MAX_FILES", _MAX_SNAPSHOT_FILES)
+    max_bytes = _snapshot_limit("SDD_GUARD_MAX_BYTES", _MAX_SNAPSHOT_BYTES)
+    max_file_bytes = _snapshot_limit("SDD_GUARD_MAX_FILE_BYTES", _MAX_SNAPSHOT_FILE_BYTES)
     skip = {'.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build'}
     for folder, dirs, names in os.walk(root):
         dirs[:] = [d for d in dirs if d not in skip]
@@ -114,10 +135,10 @@ def workspace_snapshot(root: Path) -> dict:
             if rel in {'.sdd-controller.lock', '.fixture-prompt.txt'}:
                 continue
             size = path.lstat().st_size
-            if size > _MAX_SNAPSHOT_FILE_BYTES:
-                raise RuntimeError(f"Read-only guard refuses file larger than {_MAX_SNAPSHOT_FILE_BYTES} bytes: {rel}")
+            if size > max_file_bytes:
+                raise RuntimeError(f"Read-only guard refuses file larger than {max_file_bytes} bytes: {rel}")
             total += size
-            if len(result) >= _MAX_SNAPSHOT_FILES or total > _MAX_SNAPSHOT_BYTES:
+            if len(result) >= max_files or total > max_bytes:
                 raise RuntimeError("Read-only guard snapshot exceeds repository safety bounds")
             result[rel] = _read_source(root, rel)
     return result
@@ -201,8 +222,8 @@ def snapshot_git_index(root: Path) -> bytes | None:
     return path.read_bytes()
 
 
-def _git_dir(root: Path) -> Path | None:
-    completed = subprocess.run(["git", "rev-parse", "--git-dir"], cwd=root, capture_output=True, text=True)
+def _git_storage_dir(root: Path, flag: str) -> Path | None:
+    completed = subprocess.run(["git", "rev-parse", flag], cwd=root, capture_output=True, text=True)
     if completed.returncode:
         return None
     path = Path(completed.stdout.strip())
@@ -219,33 +240,50 @@ def snapshot_git_refs(root: Path) -> dict[str, str]:
     return dict(line.split(" ", 1) for line in completed.stdout.splitlines() if " " in line)
 
 
+def _git_storage_dirs(root: Path) -> dict[str, Path]:
+    worktree = _git_storage_dir(root, "--git-dir")
+    common = _git_storage_dir(root, "--git-common-dir")
+    if worktree is None or common is None:
+        return {}
+    result = {"common": common}
+    if worktree != common:
+        result["worktree"] = worktree
+    return result
+
+
 def snapshot_git_metadata(root: Path) -> dict[str, tuple[bytes, int]]:
-    git_dir = _git_dir(root)
-    if git_dir is None:
+    dirs = _git_storage_dirs(root)
+    if not dirs:
         return {}
     result = {}
-    candidates = [git_dir / "config", git_dir / "info" / "exclude"]
-    hooks = git_dir / "hooks"
+    common = dirs["common"]
+    candidates = [("common", common / "config"), ("common", common / "info" / "exclude")]
+    hooks = common / "hooks"
     if hooks.exists():
-        candidates.extend(path for path in hooks.rglob("*") if path.is_file() or path.is_symlink())
-    for path in candidates:
+        candidates.extend(("common", path) for path in hooks.rglob("*") if path.is_file() or path.is_symlink())
+    if "worktree" in dirs:
+        candidates.append(("worktree", dirs["worktree"] / "config.worktree"))
+    for area, path in candidates:
         if not path.exists() and not path.is_symlink():
             continue
-        rel = path.relative_to(git_dir).as_posix()
-        result[rel] = (_read_source(git_dir, rel), path.lstat().st_mode & 0o7777)
+        base = dirs[area]
+        rel = path.relative_to(base).as_posix()
+        result[f"{area}:{rel}"] = (_read_source(base, rel), path.lstat().st_mode & 0o7777)
     return result
 
 
 def restore_git_metadata(root: Path, snapshot: dict[str, tuple[bytes, int]]) -> None:
-    git_dir = _git_dir(root)
-    if git_dir is None:
+    dirs = _git_storage_dirs(root)
+    if not dirs:
         return
     current = snapshot_git_metadata(root)
-    for rel in set(current) - set(snapshot):
-        path = git_dir / rel
+    for key in set(current) - set(snapshot):
+        area, rel = key.split(":", 1)
+        path = dirs[area] / rel
         path.unlink(missing_ok=True)
-    for rel, (content, mode) in snapshot.items():
-        path = git_dir / rel
+    for key, (content, mode) in snapshot.items():
+        area, rel = key.split(":", 1)
+        path = dirs[area] / rel
         if path.is_symlink() or path.is_file():
             path.unlink()
         path.parent.mkdir(parents=True, exist_ok=True)

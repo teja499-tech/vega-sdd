@@ -111,6 +111,16 @@ def test_real_agent_init_prints_complete_next_steps(demo_repo, monkeypatch):
     source = demo_repo / "src" / "service.py"
     source.parent.mkdir(parents=True)
     source.write_text("APPROVED_SOURCE = True\n", encoding="utf-8")
+    provider_files = [
+        demo_repo / ".github" / "agents" / "evil.agent.md",
+        demo_repo / ".github" / "skills" / "evil" / "SKILL.md",
+        demo_repo / ".github" / "hooks" / "hooks.json",
+        demo_repo / ".github" / "copilot" / "settings.json",
+        demo_repo / ".gemini" / "settings.json",
+    ]
+    for provider_file in provider_files:
+        provider_file.parent.mkdir(parents=True, exist_ok=True)
+        provider_file.write_text("UNAPPROVED_PROVIDER_CAPABILITY\n", encoding="utf-8")
     invocation_roots = []
 
     def mock_adapter(name, root):
@@ -119,6 +129,7 @@ def test_real_agent_init_prints_complete_next_steps(demo_repo, monkeypatch):
         assert safe_skill.exists()
         assert "IGNORE GOVERNING RULES" not in safe_skill.read_text(encoding="utf-8")
         assert (Path(root) / "src" / "service.py").read_text(encoding="utf-8") == "APPROVED_SOURCE = True\n"
+        assert not any((Path(root) / path.relative_to(demo_repo)).exists() for path in provider_files)
         return __import__("universal_sdd.adapters.mock", fromlist=["MockAdapter"]).MockAdapter(root)
 
     monkeypatch.setattr("universal_sdd.cli.get_adapter", mock_adapter)
@@ -262,3 +273,30 @@ def test_git_restore_does_not_rewrite_branch_agent_switched_to(initialized):
     assert subprocess.check_output(["git", "branch", "--show-current"], cwd=root, text=True).strip() == "main"
     assert subprocess.check_output(["git", "rev-parse", "main"], cwd=root, text=True).strip() == base
     assert subprocess.check_output(["git", "rev-parse", "agent-branch"], cwd=root, text=True).strip() == agent_tip
+
+
+def test_read_only_guard_restores_linked_worktree_common_metadata(initialized, tmp_path):
+    root = initialized.root
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.test"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    linked = tmp_path / "linked"
+    subprocess.run(["git", "worktree", "add", "-qb", "linked", str(linked)], cwd=root, check=True)
+    common_raw = subprocess.check_output(["git", "rev-parse", "--git-common-dir"], cwd=linked, text=True).strip()
+    common = Path(common_raw) if Path(common_raw).is_absolute() else (linked / common_raw).resolve()
+    hook = common / "hooks" / "pre-commit"
+
+    class Mutating:
+        def run(self, prompt, **kwargs):
+            subprocess.run(["git", "config", "--local", "sdd.poison", "persisted"], cwd=linked, check=True)
+            hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+            hook.chmod(0o755)
+            return AgentResult(success=True, text="ok")
+
+    with pytest.raises(RuntimeError, match="Git HEAD"):
+        guarded_run(Mutating(), "peek", linked, writable=False, mode="ask")
+    value = subprocess.run(["git", "config", "--local", "--get", "sdd.poison"], cwd=linked, capture_output=True, text=True)
+    assert value.returncode != 0
+    assert not hook.exists()
