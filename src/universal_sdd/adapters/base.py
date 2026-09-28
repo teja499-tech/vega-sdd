@@ -16,6 +16,33 @@ EventCallback = Callable[[AgentEvent], None]
 UNRESTRICTED_ENV = "SDD_ALLOW_UNRESTRICTED"
 
 
+WRITE_MARKERS = (
+    "--force",
+    "--yolo",
+    "--allow-all",
+    "--allow-tool",
+    "auto_edit",
+    "workspace-write",
+    "acceptEdits",
+    "accept-edits",
+)
+
+
+def assert_writable_command(name: str, cmd: list[str]) -> None:
+    """Fail fast when a writable run has no least-privilege or unrestricted write flag."""
+    if name == "mock":
+        return
+    joined = " ".join(cmd)
+    if name == "cursor" and "--mode" not in cmd:
+        return
+    if any(marker in joined for marker in WRITE_MARKERS):
+        return
+    raise RuntimeError(
+        f"{name} cannot write under the selected policy. "
+        "Use the adapter's workspace-scoped edit mode or set allow_unrestricted_agent."
+    )
+
+
 def unrestricted_agent_allowed(root: Path) -> bool:
     """Writable runs stay sandboxed unless the project owner opts in."""
     flag = os.environ.get(UNRESTRICTED_ENV, "")
@@ -53,6 +80,8 @@ class AgentAdapter(ABC):
         env: dict[str, str] | None = None,
     ) -> AgentResult:
         cmd = self.build_command(prompt, writable=writable, mode=mode)
+        if writable:
+            assert_writable_command(self.name, cmd)
         merged_env = os.environ.copy()
         if env:
             merged_env.update(env)

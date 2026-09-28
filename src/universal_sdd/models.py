@@ -80,6 +80,8 @@ class SDDConfig(BaseModel):
     typecheck_command: str | None = None
     require_resolved_clarifications: bool = True
     allow_unrestricted_agent: bool = False
+    review_agent: AgentName | None = None
+    enable_headroom: bool = True
 
 
 class ArchitectureOption(BaseModel):

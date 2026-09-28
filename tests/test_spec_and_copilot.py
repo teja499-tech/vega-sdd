@@ -76,8 +76,9 @@ def test_start_blocked_by_deferred_question(initialized):
     runner = CliRunner()
     blocked = runner.invoke(app, ["start", "--root", str(initialized.root)])
     assert blocked.exit_code != 0
-    accepted = runner.invoke(app, ["start", "--accept-deferred", "--root", str(initialized.root)])
-    assert accepted.exit_code == 0, accepted.output
+    rejected = runner.invoke(app, ["start", "--accept-deferred", "--root", str(initialized.root)])
+    assert rejected.exit_code != 0
+    assert "explicit default" in rejected.output.lower() or "clarifications" in rejected.output.lower()
 
 
 def test_compact_output_and_scoped_pytest():
@@ -144,10 +145,14 @@ def test_token_estimate_and_gemini_copilot_commands(tmp_path: Path):
     assert gem[:2] == ["gemini", "-p"]
     assert "--yolo" not in gem
     assert "--sandbox" in gem
+    assert "--approval-mode" in gem
+    assert "auto_edit" in gem
     assert "--sandbox" in GeminiAdapter(tmp_path).build_command("hello", writable=False)
     cop = CopilotAdapter(tmp_path).build_command("hello", writable=True)
     assert cop[:2] == ["copilot", "-p"]
     assert "--allow-all" not in cop
+    assert "--allow-tool" in cop
+    assert "write" in cop
     assert "--silent" in cop
 
 

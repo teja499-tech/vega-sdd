@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import json
 import re
-from pathlib import Path
 
-from .models import ArchitectureDecision, SpecBundle, ItemStatus, ProjectState, RunStatus
-from .storage import SDDPaths, dump_yaml, save_project_state
+from .models import ArchitectureDecision, SpecBundle
+from .storage import SDDPaths, dump_yaml
 
 
 def _md_list(items: list[str]) -> str:
@@ -118,8 +116,6 @@ def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verificat
     refresh_graph(paths)
     if not preserve_verification or not paths.verification_file.exists():
         dump_yaml(paths.verification_file, [])
-    state = ProjectState(run_status=RunStatus.ready, initialized=True, artifacts_generated=True)
-    save_project_state(paths, state)
     from .documentation import render_docs
     from .history import snapshot_specs, render_history
     snapshot_specs(paths)

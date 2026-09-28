@@ -27,7 +27,7 @@ from .models import (
     SpecBundle,
 )
 from .clarifications import assert_start_ready
-from .context_pack import build_context_pack, persist_working_set
+from .context_pack import build_context_pack, persist_working_set, rebuild_review_pack
 from .project_graph import refresh_graph
 from .prompts import change_analysis_prompt, implement_task_prompt, repair_task_prompt, review_task_prompt, reconcile_change_prompt
 from .review_policy import apply_review_policy, review_allows_progress
@@ -99,9 +99,14 @@ def _run_check(command: str | list[str], root: Path, task_id: str, kind: str = "
     )
 
 
-def _agent_call(adapter, prompt: str, *, paths: SDDPaths, state: ProjectState, task_id: str | None, phase: str, root: Path, protected, writable: bool, mode: str, on_event):
+def invoke_agent(adapter, prompt: str, root: Path, *, writable: bool, mode: str, on_event=None, protected=()):
+    """Every agent invocation goes through the mutation guard."""
     from .agent_guard import guarded_run
-    result = guarded_run(adapter, prompt, root, protected, writable=writable, mode=mode, on_event=on_event)
+    return guarded_run(adapter, prompt, root, protected, writable=writable, mode=mode, on_event=on_event)
+
+
+def _agent_call(adapter, prompt: str, *, paths: SDDPaths, state: ProjectState, task_id: str | None, phase: str, root: Path, protected, writable: bool, mode: str, on_event):
+    result = invoke_agent(adapter, prompt, root, writable=writable, mode=mode, on_event=on_event, protected=protected)
     record_usage(paths, state, task_id=task_id, phase=phase, prompt=prompt, result=result)
     return result
 
@@ -128,9 +133,12 @@ def run_development(
         raise RuntimeError("Initialization is incomplete. Run `sdd init` to finish product, architecture, and spec generation.")
     assert_start_ready(paths, accept_deferred=accept_deferred)
     adapter = get_adapter(config.primary_agent, root)
+    reviewer = get_adapter(config.review_agent or config.primary_agent, root)
     caps = adapter.capabilities()
     if not caps.installed:
         raise RuntimeError(f"Selected agent `{config.primary_agent.value}` is not installed. Run `sdd doctor`.")
+    if config.review_agent and not reviewer.capabilities().installed:
+        raise RuntimeError(f"Configured review agent `{config.review_agent.value}` is not installed. Run `sdd doctor`.")
 
     trace = validate_traceability(paths)
     if not trace.ok:
@@ -201,12 +209,14 @@ def run_development(
 
             if not task.check_paths:
                 task.check_paths = infer_check_paths(root, task, feature)
-            pack = build_context_pack(paths, task, feature)
+            pack = build_context_pack(paths, task, feature, phase="implement")
             pack.spec_excerpt = compress_for_prompt(paths, pack.spec_excerpt, label=f"{task.id}-spec")
             pack.contracts = compress_for_prompt(paths, pack.contracts, label=f"{task.id}-contracts")
             pack.graph_excerpt = compress_for_prompt(paths, pack.graph_excerpt, label=f"{task.id}-graph")
             persist_working_set(task, pack)
             protected = workspace.protected_paths if workspace else []
+            from .agent_guard import changed_since, workspace_snapshot
+            before_tree = workspace_snapshot(root)
 
             if not already_implemented:
                 prompt = implement_task_prompt(task, feature, root, pack)
@@ -256,9 +266,17 @@ def run_development(
                 if findings:
                     review_data = apply_review_policy({"status": "fail", "findings": findings, "summary": "Deterministic checks failed"})
                 else:
-                    review_prompt = review_task_prompt(task, feature, pack)
+                    changed = changed_since(root, before_tree)
+                    pack = rebuild_review_pack(paths, task, feature, changed, pack)
+                    persist_working_set(task, pack, extra=changed)
+                    review_prompt = review_task_prompt(
+                        task,
+                        feature,
+                        pack,
+                        independent=bool(config.review_agent and config.review_agent != config.primary_agent),
+                    )
                     review = _agent_call(
-                        adapter, review_prompt, paths=paths, state=state, task_id=task.id, phase="review",
+                        reviewer, review_prompt, paths=paths, state=state, task_id=task.id, phase="review",
                         root=root, protected=protected, writable=False, mode="plan", on_event=on_event,
                     )
                     try:
@@ -320,9 +338,10 @@ def run_development(
             if all(t.status == ItemStatus.verified for t in feature.tasks):
                 feature.status = ItemStatus.verified
                 if config.test_command:
+                    from .skill_library import lifecycle_skill
                     suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
                     _append_verification(paths, suite)
-                    journal.append("feature_suite", feature=feature.id, status=suite.status)
+                    journal.append("feature_suite", feature=feature.id, status=suite.status, skill=lifecycle_skill("verify"))
                     if suite.status == "fail":
                         task.status = ItemStatus.failed
                         feature.status = ItemStatus.in_progress
@@ -427,7 +446,7 @@ def ask_project(root: Path, question: str) -> str:
         project_context(paths) + "\n\n" + graph_context(paths, question),
         label="ask-context",
     )
-    result = adapter.run(ask_architect_prompt(question, context), writable=False, mode="ask")
+    result = invoke_agent(adapter, ask_architect_prompt(question, context), root, writable=False, mode="ask")
     if not result.success:
         raise RuntimeError(result.text or "Ask agent failed")
     Journal(paths.event_log).append("project_asked", question=question[:200])
@@ -459,7 +478,7 @@ def _change_analysis_json(adapter, paths: SDDPaths, prompt: str) -> dict:
     current = prompt
     last = ""
     for attempt in range(2):
-        result = adapter.run(current, writable=False, mode="ask")
+        result = invoke_agent(adapter, current, paths.root, writable=False, mode="ask")
         last = result.text or ""
         if not result.success:
             raise RuntimeError(last or "Change analysis agent failed")
@@ -544,8 +563,10 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     old_tasks = {t.id: t for f in old_features.values() for t in f.tasks}
 
     adapter = get_adapter(config.primary_agent, root)
-    result = adapter.run(
+    result = invoke_agent(
+        adapter,
         reconcile_change_prompt(cr.description, cr.classification, str(bundle_data), str(decision_data)),
+        root,
         writable=False,
         mode="plan",
     )
@@ -615,6 +636,7 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     state.run_status = RunStatus.ready
     state.current_feature = None
     state.current_task = None
+    state.artifacts_generated = True
     save_project_state(paths, state)
     cr.status = "applied"
     dump_yaml(paths.changes / f"{cr.id}.yaml", cr)

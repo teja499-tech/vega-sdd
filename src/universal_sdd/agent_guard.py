@@ -83,13 +83,70 @@ def files(root,patterns):
             if protected(rel):result[rel]=(b'\x00SYMLINK:'+os.readlink(path).encode()) if path.is_symlink() else path.read_bytes()
     return result
 
+def workspace_snapshot(root: Path) -> dict:
+    try:
+        return snapshot_source(root)
+    except RuntimeError:
+        result = {}
+        skip = {'.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build'}
+        for folder, dirs, names in os.walk(root):
+            dirs[:] = [d for d in dirs if d not in skip]
+            for name in names:
+                path = Path(folder) / name
+                rel = path.relative_to(root).as_posix()
+                if rel.startswith('.sdd/') and not rel.startswith('.sdd/ci/'):
+                    continue
+                if rel == '.sdd-controller.lock':
+                    continue
+                result[rel] = _read_source(root, rel)
+        return result
+
+
+def changed_since(root: Path, before: dict) -> list[str]:
+    after = workspace_snapshot(root)
+    names = set(before) | set(after)
+    return sorted(name for name in names if before.get(name) != after.get(name))
+
+
+def restore_workspace(root: Path, snapshot: dict) -> list[str]:
+    after = workspace_snapshot(root)
+    changed: list[str] = []
+    for name, content in snapshot.items():
+        path = root / name
+        if after.get(name) == content:
+            continue
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        if content is None:
+            changed.append(name)
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes) and content.startswith(b"\x00SYMLINK:"):
+            path.symlink_to(content[len(b"\x00SYMLINK:"):].decode())
+        elif isinstance(content, bytes):
+            path.write_bytes(content)
+        changed.append(name)
+    for name in after:
+        if name in snapshot:
+            continue
+        path = root / name
+        if path.is_symlink() or path.is_file():
+            path.unlink()
+        elif path.is_dir():
+            shutil.rmtree(path)
+        changed.append(name)
+    return changed
+
+
 def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
     before=files(root,patterns)
     if any(v.startswith(b'\x00SYMLINK:') for v in before.values()):raise RuntimeError('Protected controller symlink')
     def git_state():return tuple(subprocess.run(['git',*args],cwd=root,capture_output=True).stdout for args in [('rev-parse','HEAD'),('symbolic-ref','-q','HEAD'),('diff','--cached','--raw')])
     original=git_state();source=None
-    if not kwargs.get('writable',False) and (root/'.sdd/workspace.yaml').exists():
-        source=snapshot_source(root)
+    if not kwargs.get('writable',False):
+        source=workspace_snapshot(root)
     try:return adapter.run(prompt,**kwargs)
     finally:
         after=files(root,patterns)
@@ -116,5 +173,5 @@ def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
             if material:
                 raise RuntimeError('Agent modified protected controller files; restored: '+', '.join(material))
         if source is not None:
-            restore_source(root, source)
+            restore_workspace(root, source)
         if git_state()!=original:raise RuntimeError('Agent changed Git HEAD, branch or index; inspect working tree')

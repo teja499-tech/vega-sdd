@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,13 +10,15 @@ from pydantic import BaseModel, Field
 
 from .graphify_index import query_knowledge_graph
 from .models import Feature, Task
-from .skill_library import skill_summary
+from .skill_library import lifecycle_skill, skill_catalog
 from .storage import SDDPaths, load_yaml
 
 
 MAX_FILES = 15
 MAX_FILE_CHARS = 1800
 MAX_PACK_CHARS = 12000
+RESERVED_AC_CHARS = 2200
+RESERVED_FINDINGS_CHARS = 2200
 
 
 class ContextPack(BaseModel):
@@ -31,46 +34,91 @@ class ContextPack(BaseModel):
     spec_excerpt: str = ""
     contracts: str = ""
     graph_excerpt: str = ""
+    changed_files: list[str] = Field(default_factory=list)
+    out_of_scope: list[str] = Field(default_factory=list)
 
     def render(self, limit: int = MAX_PACK_CHARS) -> str:
         skills = [self.skill, *self.extra_skills]
-        catalog = "\n".join(
-            f"- {name}: {skill_summary(name)} — read `.agents/skills/{name}/SKILL.md` only if this task matches. Do not expect the runbook in this prompt."
-            for name in skills
-        )
-        body = "\n".join(
-            [
-                "Before Read, Grep, or Glob, run `graphify query` (or `graphify path` / `graphify explain`) when graphify-out/graph.json exists.",
-                "Skill catalog (name + when-to-load only):",
-                catalog,
-                f"Acceptance criteria:\n{json.dumps(self.acceptance_criteria, indent=2)}",
-                f"Working set:\n{json.dumps(self.files[:MAX_FILES], indent=2)}",
-                f"Related tests:\n{json.dumps(self.related_tests, indent=2)}",
-                f"Relevant ADRs: {', '.join(self.adr_ids) or 'none'}",
-                f"Feature contracts:\n{self.contracts or 'none recorded'}",
-                f"Spec excerpt:\n{self.spec_excerpt or 'none'}",
-                f"Graphify subgraph:\n{self.graph_excerpt or 'No scoped subgraph yet. Run sdd graph refresh.'}",
-                f"Last review findings:\n{json.dumps(self.last_findings, indent=2)}",
-            ]
-        )
-        return body[:limit]
+        sections = {
+            "intro": "Before Read, Grep, or Glob, run `graphify query` (or `graphify path` / `graphify explain`) when graphify-out/graph.json exists.",
+            "skills": "Skill catalog (name + when-to-load only):\n" + skill_catalog(*skills),
+            "acceptance": "Acceptance criteria:\n" + _bounded_json(self.acceptance_criteria, RESERVED_AC_CHARS),
+            "files": "Working set:\n" + _bounded_json(self.files[:MAX_FILES], 1500),
+            "tests": "Related tests:\n" + _bounded_json(self.related_tests, 800),
+            "adrs": "Relevant ADRs: " + (", ".join(self.adr_ids) or "none"),
+            "changed": "Changed files this task (tracked + untracked):\n" + _bounded_json(self.changed_files or self.files, 1200),
+            "oos": "Out-of-scope writes (reviewer must approve or fail):\n" + _bounded_json(self.out_of_scope, 800),
+            "contracts": "Feature contracts:\n" + _truncate_field(self.contracts or "none recorded", 1500),
+            "spec": "Spec excerpt:\n" + _truncate_field(self.spec_excerpt or "none", 2000),
+            "graph": "Graphify subgraph:\n" + _truncate_field(self.graph_excerpt or "No scoped subgraph yet. Run sdd graph refresh.", 1500),
+            "findings": "Last review findings:\n" + _bounded_json(self.last_findings, RESERVED_FINDINGS_CHARS),
+        }
+        shrinkable = ["spec", "graph", "contracts", "files", "changed", "oos", "tests", "skills"]
+        reserved = {"acceptance", "findings"}
+        body = _join_sections(sections)
+        while len(body) > limit and shrinkable:
+            key = shrinkable.pop(0)
+            if key in reserved:
+                continue
+            sections[key] = _truncate_field(sections[key], max(80, len(sections[key]) // 2))
+            body = _join_sections(sections)
+        if len(body) > limit:
+            body = _join_sections({k: sections[k] for k in ("intro", "skills", "acceptance", "findings", "oos")})
+        return body
 
 
-def skills_for_task(task: Task) -> tuple[str, list[str]]:
-    blob = f"{task.title} {task.description} {' '.join(task.verification)}".lower()
+def _join_sections(sections: dict[str, str]) -> str:
+    return "\n".join(part for part in sections.values() if part)
+
+
+def _truncate_field(text: str, budget: int) -> str:
+    raw = text or ""
+    if len(raw) <= budget:
+        return raw
+    marker = "\n…[truncated]"
+    return raw[: max(0, budget - len(marker))].rstrip() + marker
+
+
+def _bounded_json(value: Any, budget: int) -> str:
+    if isinstance(value, list):
+        kept: list[Any] = list(value)
+        dumped = json.dumps(kept, indent=2)
+        while kept and len(dumped) > budget:
+            kept.pop()
+            dumped = json.dumps(kept, indent=2)
+        if len(json.dumps(value, indent=2)) > budget:
+            if dumped.startswith("[") and dumped.endswith("]"):
+                inner = dumped[1:-1].rstrip()
+                suffix = ', "...truncated"]' if inner else '["...truncated"]'
+                candidate = "[" + inner + suffix if inner else suffix
+                if len(candidate) <= budget:
+                    return candidate
+        return dumped if len(dumped) <= budget else _truncate_field(dumped, budget)
+    dumped = json.dumps(value, indent=2)
+    return dumped if len(dumped) <= budget else _truncate_field(dumped, budget)
+
+
+def skills_for_phase(phase: str, task: Task | None = None) -> tuple[str, list[str]]:
     extra: list[str] = []
-    if any(token in blob for token in ("api", "route", "openapi", "endpoint", "http")):
-        extra.append("api-design")
-    if any(token in blob for token in ("ux", "ui", "page", "screen", "accessibility", "copy")):
-        extra.append("ux-design")
-    if any(token in blob for token in ("schema", "model", "migration", "database", "entity")):
-        extra.append("data-model")
-    if any(token in blob for token in ("readme", "docs", "guide", "documentation")):
-        extra.append("docs-writer")
-    if any(token in blob for token in ("auth", "secret", "threat", "security")):
-        extra.append("security-review")
-        extra.append("threat-model")
-    return "implement-task", extra
+    blob = ""
+    if task is not None:
+        blob = f"{task.title} {task.description} {' '.join(task.verification)}".lower()
+        if any(token in blob for token in ("api", "route", "openapi", "endpoint", "http")):
+            extra.append("api-design")
+        if any(token in blob for token in ("ux", "ui", "page", "screen", "accessibility", "copy")):
+            extra.append("ux-design")
+        if any(token in blob for token in ("schema", "model", "migration", "database", "entity")):
+            extra.append("data-model")
+        if any(token in blob for token in ("readme", "docs", "guide", "documentation")):
+            extra.append("docs-writer")
+        if any(token in blob for token in ("auth", "secret", "threat", "security")):
+            extra.append("security-review")
+            extra.append("threat-model")
+    return lifecycle_skill(phase), extra
+
+
+def skills_for_task(task: Task, phase: str = "implement") -> tuple[str, list[str]]:
+    return skills_for_phase(phase, task)
 
 
 def _existing_paths(root: Path, relatives: list[str]) -> list[str]:
@@ -132,8 +180,24 @@ def _graph_files(paths: SDDPaths, task: Task, feature: Feature) -> list[str]:
     return found[:MAX_FILES]
 
 
-def build_context_pack(paths: SDDPaths, task: Task, feature: Feature) -> ContextPack:
-    skill, extra = skills_for_task(task)
+def adr_id_from_path(path: Path) -> str:
+    stem = path.stem
+    match = re.match(r"(?i)((?:ADR|ARCH|DEC)[-_]?\d+)", stem)
+    if match:
+        return match.group(1).upper().replace("_", "-")
+    parts = stem.split("-")
+    if len(parts) >= 2 and parts[1].isdigit():
+        return f"{parts[0].upper()}-{parts[1]}"
+    return stem.upper()
+
+
+def _adr_ids(paths: SDDPaths) -> list[str]:
+    ids = [adr_id_from_path(p) for p in sorted(paths.decisions.glob("*.md"))]
+    return list(dict.fromkeys(ids))[:12]
+
+
+def build_context_pack(paths: SDDPaths, task: Task, feature: Feature, *, phase: str = "implement") -> ContextPack:
+    skill, extra = skills_for_phase(phase, task)
     graph_excerpt = query_knowledge_graph(
         paths.root,
         f"{feature.id} {feature.name} {task.id} {task.title}. Acceptance: {' '.join(task.verification)}",
@@ -161,11 +225,54 @@ def build_context_pack(paths: SDDPaths, task: Task, feature: Feature) -> Context
         acceptance_criteria=_acceptance_criteria(paths, task),
         files=unique_files,
         related_tests=unique_tests,
-        adr_ids=[p.stem.upper().split("-")[0] for p in paths.decisions.glob("*.md")][:12],
+        adr_ids=_adr_ids(paths),
         last_findings=list(task.last_findings or []),
         spec_excerpt=_spec_excerpt(paths, feature, task),
         contracts=_contracts(feature),
         graph_excerpt=graph_excerpt,
+    )
+
+
+def rebuild_review_pack(
+    paths: SDDPaths,
+    task: Task,
+    feature: Feature,
+    changed_files: list[str],
+    pack: ContextPack | None = None,
+) -> ContextPack:
+    """Rebuild the review pack from files that actually changed, including untracked."""
+    base = pack or build_context_pack(paths, task, feature, phase="review")
+    skill, extra = skills_for_phase("review", task)
+    declared = {
+        *task.working_set,
+        *feature.target_files,
+        *task.check_paths,
+        *base.files,
+        *base.related_tests,
+        f".agents/skills/{skill}/SKILL.md",
+        *[f".agents/skills/{name}/SKILL.md" for name in extra],
+        "AGENTS.md",
+    }
+    cleaned = []
+    for rel in changed_files:
+        if not rel or ".." in rel or Path(rel).is_absolute():
+            continue
+        if rel.startswith(".sdd/") or rel.startswith(".git/"):
+            continue
+        cleaned.append(rel)
+    out_of_scope = [rel for rel in cleaned if rel not in declared]
+    files = list(dict.fromkeys([*cleaned, *base.files]))[:MAX_FILES]
+    tests = list(dict.fromkeys([rel for rel in files if "test" in rel] + base.related_tests))[:MAX_FILES]
+    return base.model_copy(
+        update={
+            "skill": skill,
+            "extra_skills": extra,
+            "files": files,
+            "related_tests": tests,
+            "changed_files": cleaned,
+            "out_of_scope": out_of_scope,
+            "last_findings": list(task.last_findings or []),
+        }
     )
 
 

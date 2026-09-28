@@ -107,6 +107,21 @@ def _load_skills() -> dict[str, str]:
 
 SKILLS = _load_skills()
 
+LIFECYCLE_SKILLS = {
+    "implement": "implement-task",
+    "review": "review-task",
+    "repair": "implement-task",
+    "architecture": "architecture-design",
+    "spec": "create-feature-spec",
+    "reconcile": "reconcile",
+    "change": "spec-drift",
+    "verify": "verify-feature",
+}
+
+
+def lifecycle_skill(phase: str) -> str:
+    return LIFECYCLE_SKILLS[phase]
+
 
 def skill_summary(name: str) -> str:
     """Frontmatter description only. Full runbooks stay on disk until the agent loads them."""
@@ -118,3 +133,14 @@ def skill_summary(name: str) -> str:
             if line.startswith("description:"):
                 return line.split(":", 1)[1].strip().strip(">").strip()
     return "Load this skill when the task matches its name."
+
+
+def skill_catalog(*names: str) -> str:
+    lines = []
+    for name in names:
+        if not name:
+            continue
+        lines.append(
+            f"- {name}: {skill_summary(name)} — read `.agents/skills/{name}/SKILL.md` only if this phase matches."
+        )
+    return "\n".join(lines)

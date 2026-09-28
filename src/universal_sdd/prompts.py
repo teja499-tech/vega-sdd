@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .context_pack import ContextPack
 from .models import ArchitectureDecision, Feature, Task
+from .skill_library import lifecycle_skill, skill_catalog
 
 
 
@@ -41,8 +42,12 @@ Rules:
 """.strip()
 
 def architecture_prompt(prd: str, repo_summary: str = "") -> str:
+    skill = lifecycle_skill("architecture")
     return f"""
 You are the Product Architect for Vega SDD.
+Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Skill catalog:
+{skill_catalog(skill)}
 Analyze the PRD and identify ONLY architecture decisions that materially matter to this project.
 Do not silently choose technologies. Research-aware options should be current and realistic, but the user decides.
 Return ONLY JSON. No markdown fences.
@@ -84,8 +89,12 @@ Rules:
 
 def spec_bundle_prompt(prd: str, decisions: list[ArchitectureDecision], repo_summary: str = "") -> str:
     selected = [d.model_dump(mode="json") for d in decisions]
+    skill = lifecycle_skill("spec")
     return f"""
 You are the Specification Lead for Vega SDD.
+Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Skill catalog:
+{skill_catalog(skill, "api-design", "ux-design", "data-model")}
 Create the durable specification bundle from the PRD and approved architecture decisions.
 Return ONLY one JSON object. No markdown fences.
 Marker: SPEC_BUNDLE_JSON
@@ -206,27 +215,34 @@ Verification: {json.dumps(task.verification)}
 """.strip()
 
 
-def review_task_prompt(task: Task, feature: Feature, pack: ContextPack | None = None) -> str:
+def review_task_prompt(task: Task, feature: Feature, pack: ContextPack | None = None, *, independent: bool = False) -> str:
     pack_text = pack.render() if pack else "No context pack supplied."
+    independence = (
+        "You are the configured review agent, not the implementation agent."
+        if independent
+        else "This is an isolated second pass on a fresh subprocess, not a separately configured reviewer."
+    )
     return f"""
-You are an independent SDD reviewer. Do not assume the implementation agent was correct.
-Review the current git diff, the context pack, listed tests, and implementation for this task.
+You are an SDD reviewer. {independence} Do not assume the implementation agent was correct.
+Review the current git diff, untracked files listed in the pack, listed tests, and implementation for this task.
 Do not write, edit, or create any files. Read-only review only. No write tools.
 Do not invent UX, API, or copy. Check the feature contracts in the pack.
-Cap exploration at the working-set files. Do not crawl the repository.
+Cap exploration at the working-set and changed files in the pack. Do not crawl the repository.
 Return ONLY JSON. No markdown fences.
 Marker: TASK_REVIEW_JSON
 
 {{
   "status":"pass|fail|warning",
   "findings":[
-    {{"severity":"critical|high|medium|low","violates_ac":true,"summary":"...","evidence":"file/test/spec reference","repair":"..."}}
+    {{"severity":"critical|high|medium|low","violates_ac":true,"category":"functional|security|data-loss|integrity|required-verification","summary":"...","evidence":"file/test/spec reference","repair":"..."}}
   ],
   "summary":"..."
 }}
 
 Severity policy:
-- fail only for critical/high/medium findings that break acceptance criteria, security, or required verification.
+- critical and high always fail the task. `violates_ac=false` cannot waive them.
+- security, data-loss, integrity, and required-verification findings always fail the task.
+- medium findings fail when they break acceptance criteria or a required check.
 - low/warning nits must use status warning or pass. Never fail the task for style polish when AC is met.
 
 Feature: {feature.id} — {feature.name}
@@ -259,8 +275,12 @@ Findings:
 
 
 def change_analysis_prompt(description: str, project_context: str) -> str:
+    skill = lifecycle_skill("change")
     return f"""
 You are the SDD Architect handling an intervention.
+Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Skill catalog:
+{skill_catalog(skill)}
 Determine whether the user's concern is an implementation defect, spec defect, requirement change, or architecture change.
 Compare the concern against current specifications and repository implementation.
 Return ONLY JSON. No markdown fences.
@@ -297,8 +317,12 @@ Answer using the approved PRD, ADRs, specs, and current implementation state. Di
 
 
 def reconcile_change_prompt(description: str, classification: str, bundle_json: str, decisions_json: str) -> str:
+    skill = lifecycle_skill("reconcile")
     return f"""
 You are the SDD reconciliation architect. An explicitly approved change must be applied to canonical structured specs.
+Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Skill catalog:
+{skill_catalog(skill)}
 Return ONLY JSON. No markdown fences. Marker: RECONCILE_CHANGE_JSON
 
 Return:

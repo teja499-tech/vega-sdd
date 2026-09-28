@@ -41,5 +41,8 @@ def test_gemini_and_copilot_honor_read_write_contract(tmp_path: Path):
     write = GeminiAdapter(tmp_path).build_command("hello", writable=True)
     read = GeminiAdapter(tmp_path).build_command("hello", writable=False)
     assert "--yolo" not in write and "--sandbox" in write and "--sandbox" in read
-    assert "--allow-all" not in CopilotAdapter(tmp_path).build_command("hello", writable=True)
+    assert write[write.index("--approval-mode") + 1] == "auto_edit"
+    write_cop = CopilotAdapter(tmp_path).build_command("hello", writable=True)
+    assert "--allow-all" not in write_cop
+    assert write_cop[write_cop.index("--allow-tool") + 1] == "write"
     assert "--allow-all" not in CopilotAdapter(tmp_path).build_command("hello", writable=False)

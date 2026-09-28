@@ -1,14 +1,41 @@
 """Headroom compression for text the controller sends to an agent.
 
-Originals stay on disk. A missing Headroom install does not stop the run.
+Originals stay on disk. A missing or hung Headroom install does not stop the run.
 """
 from __future__ import annotations
 
 import hashlib
+import json
+import os
+import subprocess
+import sys
 from typing import Any
 
 from .storage import SDDPaths
 from .tokens import record_savings
+
+HEADROOM_TIMEOUT = 8
+HEADROOM_MAX_CHARS = 200_000
+HEADROOM_FAILURE_LIMIT = 3
+DISABLE_ENV = "SDD_DISABLE_HEADROOM"
+
+_FAILURES = 0
+_CIRCUIT_OPEN = False
+
+
+def headroom_enabled(paths: SDDPaths | None = None) -> bool:
+    flag = os.environ.get(DISABLE_ENV, "")
+    if flag.strip().lower() in {"1", "true", "yes"}:
+        return False
+    if _CIRCUIT_OPEN:
+        return False
+    if paths is None:
+        return True
+    try:
+        from .storage import load_config
+        return bool(load_config(paths).enable_headroom)
+    except Exception:
+        return True
 
 
 def _store_original(paths: SDDPaths, label: str, text: str) -> str:
@@ -49,27 +76,86 @@ def _unwrap(value: Any) -> str | None:
     return None
 
 
-def headroom_compress(text: str) -> str | None:
-    """Return Headroom's compressed text, or None when Headroom is unavailable."""
+def _trip_circuit() -> None:
+    global _FAILURES, _CIRCUIT_OPEN
+    _FAILURES += 1
+    if _FAILURES >= HEADROOM_FAILURE_LIMIT:
+        _CIRCUIT_OPEN = True
+
+
+def _reset_circuit() -> None:
+    global _FAILURES, _CIRCUIT_OPEN
+    _FAILURES = 0
+    _CIRCUIT_OPEN = False
+
+
+def _headroom_importable() -> bool:
     try:
-        from headroom import compress
+        import headroom  # noqa: F401
     except ImportError:
-        return None
-    try:
-        result = compress(
-            [{"role": "tool", "content": text}],
-            compress_user_messages=True,
-            target_ratio=0.5,
-            protect_recent=0,
-        )
-    except Exception:
-        return None
+        return False
+    return True
+
+
+def _worker() -> None:
+    from headroom import compress
+
+    text = sys.stdin.read()
+    result = compress(
+        [{"role": "tool", "content": text}],
+        compress_user_messages=True,
+        target_ratio=0.5,
+        protect_recent=0,
+    )
     messages = getattr(result, "messages", None)
     if isinstance(messages, list) and messages:
         content = messages[0].get("content") if isinstance(messages[0], dict) else None
         if isinstance(content, str) and content.strip():
-            return content
-    return _unwrap(result)
+            sys.stdout.write(json.dumps(content))
+            return
+    produced = _unwrap(result)
+    sys.stdout.write(json.dumps(produced))
+
+
+def _run_headroom_subprocess(text: str, *, timeout: float = HEADROOM_TIMEOUT) -> str | None:
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-c", "from universal_sdd.compress import _worker; _worker()"],
+            input=text,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        _trip_circuit()
+        return None
+    except OSError:
+        _trip_circuit()
+        return None
+    if completed.returncode != 0:
+        _trip_circuit()
+        return None
+    try:
+        produced = json.loads(completed.stdout or "null")
+    except json.JSONDecodeError:
+        _trip_circuit()
+        return None
+    if isinstance(produced, str) and produced.strip():
+        _reset_circuit()
+        return produced
+    _trip_circuit()
+    return None
+
+
+def headroom_compress(text: str, *, timeout: float = HEADROOM_TIMEOUT) -> str | None:
+    """Return Headroom's compressed text, or None when Headroom is unavailable."""
+    if _CIRCUIT_OPEN:
+        return None
+    if len(text or "") > HEADROOM_MAX_CHARS:
+        return None
+    if not _headroom_importable():
+        return None
+    return _run_headroom_subprocess(text, timeout=timeout)
 
 
 def compress_for_prompt(paths: SDDPaths, text: str, *, label: str) -> str:
@@ -77,7 +163,7 @@ def compress_for_prompt(paths: SDDPaths, text: str, *, label: str) -> str:
     if not raw.strip():
         return raw
     original = _store_original(paths, label, raw)
-    produced = headroom_compress(raw)
+    produced = headroom_compress(raw) if headroom_enabled(paths) else None
     pointer = f"\n\nFull original: `{original}`\n" if original else ""
     if produced and len(produced.rstrip()) + len(pointer) < len(raw):
         compressed = produced.rstrip() + pointer

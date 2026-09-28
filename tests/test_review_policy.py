@@ -30,6 +30,16 @@ def test_low_nits_do_not_block():
     assert not finding_blocks(data["warnings"][0])
 
 
+def test_critical_cannot_be_waived_by_violates_ac_false():
+    data = apply_review_policy({
+        "status": "pass",
+        "findings": [{"severity": "critical", "violates_ac": False, "summary": "auth bypass"}],
+    })
+    assert data["status"] == "fail"
+    assert not review_allows_progress(data)
+    assert finding_blocks(data["findings"][0])
+
+
 def test_medium_ac_break_blocks():
     data = apply_review_policy({
         "status": "pass",

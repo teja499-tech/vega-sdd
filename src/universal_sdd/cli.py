@@ -32,7 +32,7 @@ from .models import (
     SDDConfig,
     SpecBundle,
 )
-from .orchestrator import analyze_change, apply_change, ask_project, request_pause, retry_task, run_development
+from .orchestrator import analyze_change, apply_change, ask_project, invoke_agent, request_pause, retry_task, run_development
 from .prompts import (
     architecture_prompt,
     ask_architect_prompt,
@@ -93,7 +93,7 @@ def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
     """Run a read-only plan call and parse structured JSON, retrying once."""
     # Cursor --mode plan is for analysis/proposals and often returns prose.
     # Structured init payloads use ask (read-only) so the model can emit JSON.
-    result = adapter.run(prompt, writable=False, mode="ask", on_event=_event_printer)
+    result = invoke_agent(adapter, prompt, paths.root, writable=False, mode="ask", on_event=_event_printer)
     if not result.success:
         _persist_agent_text(paths, label.replace(" ", "-"), result.text)
         _fail(result.text or f"{label} agent failed")
@@ -102,7 +102,7 @@ def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
     except Exception:
         _persist_agent_text(paths, label.replace(" ", "-"), result.text)
         console.print(f"[yellow]{label} did not return valid JSON; retrying once.[/yellow]")
-        retry = adapter.run(_JSON_RETRY_PREFIX + prompt, writable=False, mode="ask", on_event=_event_printer)
+        retry = invoke_agent(adapter, _JSON_RETRY_PREFIX + prompt, paths.root, writable=False, mode="ask", on_event=_event_printer)
         _persist_agent_text(paths, label.replace(" ", "-") + "-retry", retry.text)
         if not retry.success:
             _fail(retry.text or f"{label} retry failed")
@@ -112,7 +112,7 @@ def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
             _fail(f"Could not parse {label} output: {exc}")
 
 
-def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision], yes: bool) -> list[ArchitectureDecision]:
+def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision], yes: bool, root: Path) -> list[ArchitectureDecision]:
     for d in decisions:
         console.print()
         console.rule(f"{d.id} · {d.category.replace('_', ' ').title()}")
@@ -145,7 +145,7 @@ def _select_architecture(adapter, prd: str, decisions: list[ArchitectureDecision
             if raw.lower() == "a":
                 q = typer.prompt("Question for architect")
                 ctx = f"PRD:\n{prd}\n\nArchitecture decision:\n{json.dumps(d.model_dump(mode='json'), indent=2)}"
-                ans = adapter.run(ask_architect_prompt(q, ctx), writable=False, mode="plan")
+                ans = invoke_agent(adapter, ask_architect_prompt(q, ctx), root, writable=False, mode="plan")
                 console.print(Panel(ans.text or "No response", title="Architect"))
                 continue
             if raw.lower() == "d":
@@ -281,7 +281,7 @@ def init(
             "architecture",
             paths,
         )
-        decisions = _select_architecture(adapter, augmented_prd, decisions, yes)
+        decisions = _select_architecture(adapter, augmented_prd, decisions, yes, root)
         write_architecture(paths, decisions)
         record_architecture_decisions(paths, decisions)
 
@@ -301,6 +301,8 @@ def init(
             write_spec_bundle(paths, bundle)
         except ValueError as exc:
             _fail_init(str(exc), 2)
+        from .clarifications import merge_open_questions
+        merge_open_questions(paths, bundle.product.open_questions)
 
         report = validate_traceability(paths)
         if not report.ok:
@@ -313,6 +315,7 @@ def init(
         ready = load_project_state(paths)
         ready.initialized = True
         ready.run_status = RunStatus.ready
+        ready.artifacts_generated = True
         save_project_state(paths, ready)
         finished = True
 
@@ -393,6 +396,12 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
         except ImportError:
             headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
         console.print(f"Headroom: {headroom_state}")
+        if cfg.review_agent:
+            console.print(f"Review agent: [bold]{cfg.review_agent.value}[/bold]")
+        else:
+            console.print("Review agent: same as primary (isolated second pass)")
+        if not cfg.enable_headroom:
+            console.print("Headroom compression: disabled in config")
         if cfg.allow_unrestricted_agent:
             console.print("[yellow]allow_unrestricted_agent is on: writable agents receive vendor auto-approve flags. Keep the run isolated.[/yellow]")
         else:
@@ -554,7 +563,7 @@ def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
             if cr.requires_approval:
                 console.print("Run `sdd change \"...\"` to explicitly approve/apply it.")
             continue
-        result = adapter.run(ask_architect_prompt(question, project_context(paths)), writable=False, mode="plan")
+        result = invoke_agent(adapter, ask_architect_prompt(question, project_context(paths)), root, writable=False, mode="plan")
         console.print(Panel(result.text or "No response", title="Architect"))
 
 
@@ -783,7 +792,7 @@ def docs_refresh(root: Path = typer.Option(Path("."), "--root"), enrich: bool = 
             + "\nApproved ADRs: " + json.dumps(load_yaml(paths.architecture_decisions_file, []))
             + "\nRepository inventory (not proof of behavior): " + summarize_repository(paths.root)
         )
-        result = get_adapter(config.primary_agent, paths.root).run(prompt, writable=False, mode="plan", on_event=_event_printer)
+        result = invoke_agent(get_adapter(config.primary_agent, paths.root), prompt, paths.root, writable=False, mode="plan", on_event=_event_printer)
         if not result.success:
             _fail(result.text or "Documentation agent failed; canonical documents unchanged")
         try:

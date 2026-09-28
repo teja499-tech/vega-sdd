@@ -35,15 +35,15 @@ The controller has already run deterministic checks. Your job is an independent 
 ## Severity
 | Severity | Fail the task? | Use when |
 |---|---|---|
-| `critical` | Yes | Data loss, auth bypass, or the task's primary behavior is absent |
-| `high` | Yes | An acceptance criterion is false or the required test is missing |
-| `medium` | Yes | Security or integrity defect that breaks a stated contract |
+| `critical` | Always | Data loss, auth bypass, or the task's primary behavior is absent |
+| `high` | Always | An acceptance criterion is false or the required test is missing |
+| `medium` | Yes when AC or a required check is broken | Security or integrity defect that breaks a stated contract |
 | `low` | No | Naming, comments, optional polish |
 | `warning` | No | Suggestion that does not violate acceptance criteria |
 
-Set `violates_ac` to true only for critical, high, and medium findings that break a criterion or a required check.
+`violates_ac=false` cannot waive `critical` or `high`. Security, data-loss, integrity, and required-verification findings always fail the task, even when they are not worded as an acceptance-criterion miss.
 
-If every criterion is met, `status` is `pass`. If only low or warning findings exist, `status` is `warning`. Never `fail` a task for style when acceptance criteria pass.
+If every criterion is met and there is no critical/high/security finding, `status` is `pass`. If only low or warning findings exist, `status` is `warning`. Never `fail` a task for style when acceptance criteria pass.
 
 ## Output contract
 ```

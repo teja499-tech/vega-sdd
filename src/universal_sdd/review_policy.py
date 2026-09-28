@@ -4,11 +4,35 @@ from __future__ import annotations
 from typing import Any
 
 BLOCKING_SEVERITIES = {"critical", "high", "medium"}
+ALWAYS_BLOCKING_SEVERITIES = {"critical", "high"}
 NON_BLOCKING_SEVERITIES = {"low", "warning", "info", "nit"}
+ALWAYS_BLOCKING_CATEGORIES = {
+    "security",
+    "data-loss",
+    "data_loss",
+    "integrity",
+    "required-verification",
+    "required_verification",
+}
 
 
 def _severity(finding: dict[str, Any]) -> str:
     return str(finding.get("severity") or "").strip().lower()
+
+
+def _category(finding: dict[str, Any]) -> str:
+    for key in ("category", "kind", "type"):
+        value = str(finding.get(key) or "").strip().lower()
+        if value:
+            return value
+    blob = " ".join(
+        str(finding.get(key) or "")
+        for key in ("summary", "evidence", "repair")
+    ).lower()
+    for token in ALWAYS_BLOCKING_CATEGORIES:
+        if token.replace("_", " ") in blob or token.replace("-", " ") in blob:
+            return token
+    return ""
 
 
 def _explicit_false(value: Any) -> bool:
@@ -20,6 +44,10 @@ def finding_blocks(finding: Any) -> bool:
     if not isinstance(finding, dict):
         return True
     severity = _severity(finding)
+    if severity in ALWAYS_BLOCKING_SEVERITIES:
+        return True
+    if _category(finding) in ALWAYS_BLOCKING_CATEGORIES:
+        return True
     if severity in NON_BLOCKING_SEVERITIES:
         return False
     if _explicit_false(finding.get("violates_ac")):

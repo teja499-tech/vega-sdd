@@ -40,11 +40,13 @@ Because vendor flags can evolve, the adapter is intentionally small and covered 
 
 ## Gemini CLI
 
-The adapter targets the `gemini` CLI one-shot `-p` prompt. Writable implement/repair runs add `--yolo` only after the unrestricted-agent opt-in. Read-only review/ask adds `--sandbox`.
+The adapter targets the `gemini` CLI one-shot `-p` prompt. Restricted writable implement/repair uses `--sandbox --approval-mode auto_edit` so file edits inside the workspace can proceed without granting shell/network auto-approval. `--yolo` is added only after the unrestricted-agent opt-in. Read-only review/ask adds `--sandbox`.
 
 ## GitHub Copilot CLI
 
-The adapter targets `copilot -p` with `--silent`. Writable runs add `--allow-all` only after the unrestricted-agent opt-in; review/ask omit write approvals.
+The adapter targets `copilot -p` with `--silent`. Restricted writable runs pass `--allow-tool write`. `--allow-all` is added only after the unrestricted-agent opt-in; review/ask omit write approvals.
+
+Set `review_agent` in `.sdd/config.yaml` to use a different installed adapter for the isolated review pass. When unset, review is a fresh subprocess of the primary agent, not an independently configured reviewer.
 
 ## IDE copilot (optional MCP)
 

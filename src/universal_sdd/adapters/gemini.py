@@ -23,6 +23,7 @@ class GeminiAdapter(AgentAdapter):
             version=version,
             notes=[
                 "Uses Gemini CLI one-shot `-p` prompt mode.",
+                "Restricted writable runs use --sandbox --approval-mode auto_edit.",
                 "Writable runs add --yolo only when allow_unrestricted_agent is set.",
                 "Read-only review/ask uses --sandbox when the local CLI supports it.",
             ],
@@ -32,6 +33,8 @@ class GeminiAdapter(AgentAdapter):
         cmd = ["gemini", "-p", prompt]
         if writable and unrestricted_agent_allowed(self.root):
             cmd.append("--yolo")
+        elif writable:
+            cmd.extend(["--sandbox", "--approval-mode", "auto_edit"])
         else:
             cmd.append("--sandbox")
         return cmd

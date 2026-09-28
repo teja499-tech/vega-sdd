@@ -1,4 +1,4 @@
-> **Vega SDD 0.3.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical.
+> **Vega SDD 0.4.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical. Supported primary agents: Cursor, Codex, Claude Code, Gemini CLI, and GitHub Copilot CLI.
 
 # v0.1.2 update
 
@@ -45,7 +45,7 @@ cd my-app
 sdd init
 ```
 
-You will choose Cursor, Codex, or Claude Code. The selected agent is used as the architect/specification engine during initialization and becomes the primary implementation engine until changed.
+You will choose Cursor, Codex, Claude Code, Gemini, or GitHub Copilot. The selected agent is used as the architect/specification engine during initialization and becomes the primary implementation engine until changed. Set `review_agent` in `.sdd/config.yaml` when high-risk work needs a separate reviewer.
 
 ### Product discovery
 
@@ -222,6 +222,8 @@ sdd clarify
 sdd clarify Q1 --answer "Owners may export their own workspace only."
 sdd start --accept-deferred
 ```
+
+`--accept-deferred` only signs an item that already has an explicit default or option ID. For architecture, that writes the recommended option onto the decision and ADR. A deferred question with no default still blocks start.
 
 A failed task stays out of the scheduler until you retry it. `--keep-code` requeues verification without discarding the working tree:
 

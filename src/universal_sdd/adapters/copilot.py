@@ -23,6 +23,7 @@ class CopilotAdapter(AgentAdapter):
             version=version,
             notes=[
                 "Uses GitHub Copilot CLI `-p` prompt mode with --silent.",
+                "Restricted writable runs allow the write tool only.",
                 "Writable runs pass --allow-all only when allow_unrestricted_agent is set.",
             ],
         )
@@ -31,4 +32,6 @@ class CopilotAdapter(AgentAdapter):
         cmd = ["copilot", "-p", prompt, "--silent"]
         if writable and unrestricted_agent_allowed(self.root):
             cmd.append("--allow-all")
+        elif writable:
+            cmd.extend(["--allow-tool", "write"])
         return cmd

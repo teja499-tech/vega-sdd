@@ -1,6 +1,7 @@
 """Graphify is the knowledge graph. SDD only feeds it a traceability corpus."""
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -116,13 +117,38 @@ def refresh_knowledge_graph(paths: SDDPaths, *, timeout: int = 600) -> dict:
     }
 
 
+def search_trace_corpus(root: Path, question: str, *, limit: int = 2500) -> str:
+    """Deterministic keyword search of the SDD traceability corpus."""
+    corpus = corpus_path(root)
+    if not corpus.exists():
+        return ""
+    tokens = [tok for tok in re.findall(r"[A-Za-z0-9_./-]+", question or "") if len(tok) >= 3]
+    if not tokens:
+        return ""
+    hits: list[str] = []
+    for line in corpus.read_text(encoding="utf-8").splitlines():
+        lowered = line.lower()
+        if any(tok.lower() in lowered for tok in tokens):
+            hits.append(line)
+    return "\n".join(hits)[:limit]
+
+
 def query_knowledge_graph(root: Path, question: str, *, limit: int = 4000, timeout: int = 90) -> str:
-    if not graphify_installed() or not graph_json(root).exists():
-        return ""
-    code, output = run_graphify(root, ["query", question], timeout=timeout)
-    if code != 0:
-        return ""
-    return output[:limit]
+    parts: list[str] = []
+    if graphify_installed() and graph_json(root).exists():
+        code, output = run_graphify(root, ["query", question], timeout=timeout)
+        if code == 0 and output.strip():
+            parts.append("# Code graph\n" + output.strip())
+    corpus = search_trace_corpus(root, question)
+    if not corpus and not corpus_path(root).exists():
+        try:
+            write_trace_corpus(SDDPaths(root))
+        except Exception:
+            pass
+        corpus = search_trace_corpus(root, question)
+    if corpus:
+        parts.append("# Traceability corpus\n" + corpus)
+    return "\n\n".join(parts)[:limit]
 
 
 def graph_context(paths: SDDPaths, question: str = "architecture and requirements") -> str:
