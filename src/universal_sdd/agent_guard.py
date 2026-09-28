@@ -84,22 +84,20 @@ def files(root,patterns):
     return result
 
 def workspace_snapshot(root: Path) -> dict:
-    try:
-        return snapshot_source(root)
-    except RuntimeError:
-        result = {}
-        skip = {'.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build'}
-        for folder, dirs, names in os.walk(root):
-            dirs[:] = [d for d in dirs if d not in skip]
-            for name in names:
-                path = Path(folder) / name
-                rel = path.relative_to(root).as_posix()
-                if rel.startswith('.sdd/') and not rel.startswith('.sdd/ci/'):
-                    continue
-                if rel == '.sdd-controller.lock':
-                    continue
-                result[rel] = _read_source(root, rel)
-        return result
+    """Walk the working tree. Git ls-files would hide gitignored and some untracked files."""
+    result = {}
+    skip = {'.git', 'node_modules', '.venv', '__pycache__', 'dist', 'build'}
+    for folder, dirs, names in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in skip]
+        for name in names:
+            path = Path(folder) / name
+            rel = path.relative_to(root).as_posix()
+            if rel.startswith('.sdd/') and not rel.startswith('.sdd/ci/'):
+                continue
+            if rel in {'.sdd-controller.lock', '.fixture-prompt.txt'}:
+                continue
+            result[rel] = _read_source(root, rel)
+    return result
 
 
 def changed_since(root: Path, before: dict) -> list[str]:

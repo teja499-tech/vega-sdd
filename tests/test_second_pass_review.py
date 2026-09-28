@@ -223,6 +223,33 @@ def test_review_agent_is_selected(initialized):
     assert state.run_status == RunStatus.completed
 
 
+def test_read_only_restore_keeps_existing_untracked_files(initialized):
+    from universal_sdd.agent_guard import workspace_snapshot
+    from universal_sdd.orchestrator import invoke_agent
+
+    created = initialized.root / "app" / "kept.py"
+    created.parent.mkdir(parents=True, exist_ok=True)
+    created.write_text("ok\n", encoding="utf-8")
+    before = workspace_snapshot(initialized.root)
+
+    class Peek:
+        def capabilities(self):
+            return AgentCapabilities(installed=True)
+
+        def interrupt(self):
+            return True
+
+        def run(self, prompt, **kwargs):
+            (initialized.root / "app" / "extra.py").write_text("new\n", encoding="utf-8")
+            return AgentResult(success=True, text="ok")
+
+    invoke_agent(Peek(), "hello", initialized.root, writable=False, mode="ask")
+    assert created.exists()
+    assert not (initialized.root / "app" / "extra.py").exists()
+    rel = created.relative_to(initialized.root).as_posix()
+    assert workspace_snapshot(initialized.root)[rel] == before[rel]
+
+
 def test_ask_restores_source_mutations(initialized):
     secret = initialized.root / "leaked.txt"
 
@@ -351,3 +378,21 @@ def test_adapter_middle_modes_and_fail_fast(tmp_path):
     assert cop[cop.index("--allow-tool") + 1] == "write"
     with pytest.raises(RuntimeError, match="cannot write"):
         assert_writable_command("gemini", ["gemini", "-p", "hello"])
+    assert_writable_command("scripted-process-fixture", [sys.executable, "fixture_agent.py"])
+    assert_writable_command("mock", ["mock", "hello"])
+
+
+def test_brownfield_summary_prioritizes_manifests(tmp_path):
+    from universal_sdd.repository import summarize_repository
+
+    (tmp_path / "zzz.txt").write_text("noise\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("# App\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "main.py").write_text("print(1)\n", encoding="utf-8")
+    (tmp_path / "graphify-out").mkdir()
+    (tmp_path / "graphify-out" / "graph.json").write_text("{}\n", encoding="utf-8")
+    text = summarize_repository(tmp_path)
+    assert text.index("pyproject.toml") < text.index("zzz.txt")
+    assert text.index("README.md") < text.index("zzz.txt")
+    assert "Graphify graph: present" in text

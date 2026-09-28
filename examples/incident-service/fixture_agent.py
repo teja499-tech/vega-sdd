@@ -106,14 +106,15 @@ elif 'RECONCILE_CHANGE_JSON' in prompt:
 elif 'CHANGE_ANALYSIS_JSON' in prompt:
     output=dict(classification='requirement_change',affected_requirements=['REQ-002'],affected_features=['F002'],affected_tasks=['TASK-F002-001'],proposed_changes=['Change title maximum to 80'],requires_approval=True)
 elif 'TASK_IMPLEMENTATION' in prompt or 'Findings:' in prompt:
-    if 'TASK-F001' in prompt:
+    # Match the controller's current task card, not other TASK-* ids that appear in the corpus pack.
+    if 'Task: TASK-F001-001' in prompt:
         copy('store.py');(root/'acceptance').mkdir(exist_ok=True);shutil.copyfile(assets/'acceptance/test_storage.py',root/'acceptance/test_storage.py')
-    elif 'TASK-F002' in prompt:
+    elif 'Task: TASK-F002-001' in prompt:
         copy('service.py');shutil.copyfile(assets/'acceptance/test_api.py',root/'acceptance/test_api.py')
         if 'TASK_IMPLEMENTATION' in prompt and not (root/'fixture-seeded-once').exists():
             # Seed a real authentication regression for the controller to discover.
             p=root/'service.py';p.write_text(p.read_text().replace('return result(401,','return result(200,'));(root/'fixture-seeded-once').touch()
-        if (root/'fixture-change-approved').exists():
+        if (root/'fixture-change-approved').exists() or '1..80' in prompt or 'title maximum to 80' in prompt.lower():
             p=root/'service.py';p.write_text(p.read_text().replace('MAX_TITLE = 120','MAX_TITLE = 80'))
             (root/'acceptance/test_change.py').write_text("import unittest\nimport test_api\nfrom store import Store\nclass ChangedTitleTests(unittest.TestCase):\n    setUp = test_api.APITests.setUp\n    tearDown = test_api.APITests.tearDown\n    req = test_api.APITests.req\n    def test_existing_long_title_retained(self):\n        Store(self.db).create('x'*120)\n        self.assertEqual(len(self.req('/incidents')[1]['items'][0]['title']),120)\n    def test_new_limit(self):\n        self.assertEqual(self.req('/incidents',{'title':'x'*81},'POST')[0],400)\n        self.assertEqual(self.req('/incidents',{'title':'x'*80},'POST')[0],201)\n")
     else:

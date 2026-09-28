@@ -28,9 +28,12 @@ WRITE_MARKERS = (
 )
 
 
+VENDOR_WRITE_POLICY = {"cursor", "codex", "claude", "gemini", "copilot"}
+
+
 def assert_writable_command(name: str, cmd: list[str]) -> None:
-    """Fail fast when a writable run has no least-privilege or unrestricted write flag."""
-    if name == "mock":
+    """Fail fast when a vendor writable run has no least-privilege or unrestricted write flag."""
+    if name not in VENDOR_WRITE_POLICY:
         return
     joined = " ".join(cmd)
     if name == "cursor" and "--mode" not in cmd:
