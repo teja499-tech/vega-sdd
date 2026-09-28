@@ -52,7 +52,7 @@ flowchart TD
     I[Implementation] --> C[Configured deterministic checks]
     C -->|fail| R[Bounded repair]
     R --> I
-    C -->|pass| V[Independent review]
+    C -->|pass| V[Isolated review pass]
     V -->|blocking finding| R
     V -->|pass| E[Verified task and evidence]
 ```

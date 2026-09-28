@@ -4,19 +4,19 @@
 
 Vega SDD is an open-source control plane for building software with Cursor, Codex, Claude Code, Gemini CLI, or GitHub Copilot CLI. Product intent, architecture decisions, tasks, checks, review evidence, changes, and recovery state stay in the repository, so work can continue across terminals, sessions, and coding agents.
 
-> **Status: 0.4.0 alpha.** The framework has 205 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, hosted branch protection, deployment hooks, and application-specific safety remain your responsibility. See [0.4.0 verification](docs/VERIFICATION_0.4.0.md).
+> **Status: 0.4.0 alpha.** The framework has 205 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, hosted branch protection, deployment hooks, and application-specific safety remain your responsibility. See [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md).
 
 ## Choose your starting point
 
 | You have | Start here |
 | --- | --- |
-| An idea, but no PRD | [Create a PRD with ChatGPT or Claude](docs/PRD_DISCOVERY.md) |
-| A PRD and an empty repository | [Greenfield journey](docs/USE_CASES.md#1-build-a-new-application-from-a-prd) |
-| An existing application to enhance | [Brownfield journey](docs/USE_CASES.md#2-add-a-feature-to-an-existing-application) |
-| A defect in an SDD-managed project | [Defect journey](docs/USE_CASES.md#3-fix-a-defect-without-changing-approved-intent) |
-| A changed requirement or architecture decision | [Change journey](docs/USE_CASES.md#4-change-an-approved-requirement) |
-| A paused, failed, or interrupted run | [Recovery journey](docs/USE_CASES.md#5-resume-or-recover-work) |
-| A completed application needing documentation | [Adoption journey](docs/USE_CASES.md#8-adopt-and-document-a-mature-application) |
+| An idea, but no PRD | [Create a PRD with ChatGPT or Claude](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PRD_DISCOVERY.md) |
+| A PRD and an empty repository | [Greenfield journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#1-build-a-new-application-from-a-prd) |
+| An existing application to enhance | [Brownfield journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#2-add-a-feature-to-an-existing-application) |
+| A defect in an SDD-managed project | [Defect journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#3-fix-a-defect-without-changing-approved-intent) |
+| A changed requirement or architecture decision | [Change journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#4-change-an-approved-requirement) |
+| A paused, failed, or interrupted run | [Recovery journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#5-resume-or-recover-work) |
+| A completed application needing documentation | [Adoption journey](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md#8-adopt-and-document-a-mature-application) |
 
 ## Five-minute safe trial
 
@@ -99,7 +99,7 @@ flowchart TD
     C --> D[Requirements, features, and tasks]
     D --> E[One bounded implementation task]
     E --> F[Deterministic project checks]
-    F --> G[Independent review]
+    F --> G[Isolated review pass]
     G -->|repair needed| E
     G -->|verified| H[Evidence and durable state]
     H --> I[Next dependency-ready task]
@@ -123,7 +123,7 @@ sdd docs refresh --enrich                    # refresh human design docs read-on
 sdd graph refresh                            # optional local code graph
 ```
 
-See the [command reference](docs/COMMAND_REFERENCE.md) for the complete CLI.
+See the [command reference](https://github.com/teja499-tech/vega-sdd/blob/main/docs/COMMAND_REFERENCE.md) for the complete CLI.
 
 ## Capabilities at a glance
 
@@ -132,7 +132,7 @@ See the [command reference](docs/COMMAND_REFERENCE.md) for the complete CLI.
 - Stable requirement, acceptance-criterion, feature, and task IDs.
 - Dependency-aware task scheduling with pause, resume, retry, and recovery.
 - Deterministic application checks before AI review.
-- Independent review and bounded repair loops.
+- Isolated review and bounded repair loops, with a distinct reviewer when configured.
 - Risk-routed API, data, UX, security, reliability, performance, migration, E2E, and agent-system runbooks.
 - Project-specific skills with approval-bound agent instructions.
 - Read-only project questions, change classification, and explicit intent approval.
@@ -141,7 +141,7 @@ See the [command reference](docs/COMMAND_REFERENCE.md) for the complete CLI.
 - Branch, pull-request, CI export, immutable build, deployment, rollback, and checkpoint contracts.
 - New applications, existing systems, monorepos, libraries, CLIs, data pipelines, infrastructure, mobile, ML, and custom projects.
 
-The complete capability inventory is in [FEATURES.md](docs/FEATURES.md).
+The complete capability inventory is in [FEATURES.md](https://github.com/teja499-tech/vega-sdd/blob/main/docs/FEATURES.md).
 
 ## Repository-owned outputs
 
@@ -174,17 +174,17 @@ Graphify improves local structural retrieval. Headroom compresses context packs 
 
 | Guide | Use it for |
 | --- | --- |
-| [User guide](docs/USER_GUIDE.md) | Complete setup and daily workflow |
-| [PRD discovery](docs/PRD_DISCOVERY.md) | Turn an idea into a framework-ready PRD using ChatGPT, Claude, or another assistant |
-| [Use-case journeys](docs/USE_CASES.md) | Copy/paste flows for greenfield, brownfield, defects, changes, recovery, monorepos, and delivery |
-| [Command reference](docs/COMMAND_REFERENCE.md) | Exact CLI groups, options, and examples |
-| [Feature reference](docs/FEATURES.md) | What every framework capability does |
-| [Project lifecycle](docs/PROJECT_LIFECYCLE.md) | Policies, checks, branches, PRs, CI, releases, and portfolios |
-| [Human documentation](docs/HUMAN_DOCUMENTATION.md) | HLD/LLD/API/data/security/operations docs and history |
-| [Architecture](docs/ARCHITECTURE.md) | Controller, adapters, state, capability routing, and safety boundaries |
-| [Agent adapters](docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, mock, and MCP behavior |
-| [Recovery](docs/RECOVERY.md) | Crash recovery, checkpoints, and context hygiene |
-| [0.4.0 verification](docs/VERIFICATION_0.4.0.md) | Reproducible test and benchmark evidence |
+| [User guide](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USER_GUIDE.md) | Complete setup and daily workflow |
+| [PRD discovery](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PRD_DISCOVERY.md) | Turn an idea into a framework-ready PRD using ChatGPT, Claude, or another assistant |
+| [Use-case journeys](https://github.com/teja499-tech/vega-sdd/blob/main/docs/USE_CASES.md) | Copy/paste flows for greenfield, brownfield, defects, changes, recovery, monorepos, and delivery |
+| [Command reference](https://github.com/teja499-tech/vega-sdd/blob/main/docs/COMMAND_REFERENCE.md) | Exact CLI groups, options, and examples |
+| [Feature reference](https://github.com/teja499-tech/vega-sdd/blob/main/docs/FEATURES.md) | What every framework capability does |
+| [Project lifecycle](https://github.com/teja499-tech/vega-sdd/blob/main/docs/PROJECT_LIFECYCLE.md) | Policies, checks, branches, PRs, CI, releases, and portfolios |
+| [Human documentation](https://github.com/teja499-tech/vega-sdd/blob/main/docs/HUMAN_DOCUMENTATION.md) | HLD/LLD/API/data/security/operations docs and history |
+| [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, adapters, state, capability routing, and safety boundaries |
+| [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, mock, and MCP behavior |
+| [Recovery](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RECOVERY.md) | Crash recovery, checkpoints, and context hygiene |
+| [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md) | Reproducible test and benchmark evidence |
 
 ## Safety boundaries
 
@@ -200,4 +200,4 @@ python -m pytest tests
 python -m build
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [CHANGELOG.md](CHANGELOG.md). Report issues with the Vega version, OS, Python version, project kind, adapter, reproduction steps, and redacted logs.
+See [CONTRIBUTING.md](https://github.com/teja499-tech/vega-sdd/blob/main/CONTRIBUTING.md), [SECURITY.md](https://github.com/teja499-tech/vega-sdd/blob/main/SECURITY.md), and [CHANGELOG.md](https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md). Report issues with the Vega version, OS, Python version, project kind, adapter, reproduction steps, and redacted logs.

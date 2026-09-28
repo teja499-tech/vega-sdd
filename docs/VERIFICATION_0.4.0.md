@@ -116,7 +116,7 @@ Project is ready for implementation.
 Traceability PASS (0 warning(s))
 ```
 
-The documented five-minute journey was also replayed through `sdd start`. Its mock implementation and independent-review phases passed, and the final status reported one of one tasks and one of one requirements verified. This demonstrates the controller flow only; the mock adapter does not write production application code.
+The documented five-minute journey was also replayed through `sdd start`. Its mock implementation and isolated review phases passed, and the final status reported one of one tasks and one of one requirements verified. This demonstrates the controller flow only; the mock adapter does not write production application code or prove independent model review quality.
 
 ## Documentation validation
 

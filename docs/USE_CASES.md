@@ -32,8 +32,8 @@ sdd clarify
 
 sdd project inspect
 sdd project setup
-sdd project readiness
 sdd project check
+sdd project readiness
 
 git status --short
 git add -A
@@ -49,6 +49,8 @@ sdd resume
 ```
 
 Best practice: inspect the first completed task and its tests before allowing a long run. Use `sdd pause` from another terminal when you want the current run to stop at the next safe boundary.
+
+If the greenfield repository has no runnable code yet, use substantive temporary waivers for checks that cannot exist before the first task, then replace them with real commands as soon as the component is created. Readiness follows the full check because it requires current check evidence.
 
 ## 2. Add a feature to an existing application
 
@@ -259,8 +261,8 @@ Apply and run:
 
 ```bash
 sdd project configure --file workspace-policy.yaml
-sdd project readiness
 sdd project check
+sdd project readiness
 git status --short
 git add -A
 git status --short

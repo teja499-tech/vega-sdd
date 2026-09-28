@@ -49,9 +49,9 @@ sdd agent use claude
 
 Each agent call receives one task, applicable acceptance criteria, a working set, recent findings, Graphify context when available, and the selected roles/skills. The controller, not the agent, chooses and advances lifecycle state.
 
-### Independent review and repair
+### Isolated or distinct review and repair
 
-After deterministic checks, a fresh review pass maps the implementation to acceptance criteria. Blocking findings enter a bounded repair loop. Low/warning findings that do not violate acceptance criteria are recorded without blocking.
+After deterministic checks, a fresh review pass maps the implementation to acceptance criteria. By default this is isolated self-review in a new subprocess of the selected provider. Blocking findings enter a bounded repair loop. Low/warning findings that do not violate acceptance criteria are recorded without blocking.
 
 Set a distinct provider when required:
 

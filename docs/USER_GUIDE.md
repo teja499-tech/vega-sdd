@@ -225,8 +225,8 @@ Start interactively:
 sdd project profiles
 sdd project inspect
 sdd project setup
-sdd project readiness
 sdd project check
+sdd project readiness
 ```
 
 For repeatable configuration, save and review a policy file:
@@ -265,11 +265,13 @@ Apply it:
 
 ```bash
 sdd project configure --file workspace-policy.yaml
-sdd project readiness
 sdd project check
+sdd project readiness
 ```
 
 The policy uses argv arrays, not shell strings. Put secret *names* in `env_names`, never secret values in YAML. Every project kind has required checks; provide a real command or a substantive waiver. See [project lifecycle](PROJECT_LIFECYCLE.md) for web, library, CLI, data, ML, infrastructure, mobile, desktop, embedded, docs, custom, and monorepo examples.
+
+On a new repository that does not yet contain runnable code, configure any meaningful baseline command that already exists and use a substantive, temporary waiver for checks that cannot exist before the first implementation task. Replace those waivers with real commands as soon as the relevant component is created. `sdd project check` records current full-check evidence; `sdd project readiness` then confirms that evidence and the policy have no remaining gaps.
 
 Changes to approved agent instructions, skills, roles, Copilot/Gemini configuration, or other protected capability surfaces invalidate approval. Review the change, then reapply the policy:
 
@@ -281,10 +283,14 @@ sdd project configure --file .sdd/workspace.yaml
 ## 9. Commit the baseline and create an execution branch
 
 ```bash
-git add PRD.md AGENTS.md .agents .sdd SDD_PROJECT.md
+git status --short
+git add -A
+git status --short
 git commit -m "Initialize Vega SDD project"
 sdd repo branch first-scope
 ```
+
+Review both status outputs and unstage credentials, local caches, or unrelated work before committing. Initialization creates several root documents and provider-specific instruction surfaces in addition to `.sdd/` and `.agents/`; leaving any of them untracked makes the source tree dirty, so `sdd repo branch` will stop rather than hide the omission.
 
 The default branch name is `sdd/first-scope`. Vega refuses implementation on protected, detached, or unborn branches. It also supports an isolated worktree:
 
