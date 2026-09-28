@@ -106,7 +106,6 @@ def test_apply_change_preserves_run_accounting(initialized):
     state.active_run_id = "RUN-KEEP"
     state.tokens_used = 42
     save_project_state(initialized, state)
-    bundle = load_yaml(initialized.spec_bundle_file)
 
     class Reconciler:
         def capabilities(self):
@@ -116,7 +115,20 @@ def test_apply_change_preserves_run_accounting(initialized):
             return True
 
         def run(self, prompt, **kwargs):
-            return AgentResult(success=True, text=json.dumps({"bundle": bundle, "invalidate_tasks": []}))
+            return AgentResult(
+                success=True,
+                text=json.dumps(
+                    {
+                        "requirement_updates": [
+                            {
+                                "id": "REQ-001",
+                                "statement": "The system shall support the clarified core workflow.",
+                            }
+                        ],
+                        "invalidate_tasks": [],
+                    }
+                ),
+            )
 
     from universal_sdd.models import ChangeRequest
     with patch("universal_sdd.orchestrator.get_adapter", return_value=Reconciler()):
@@ -132,7 +144,9 @@ def test_apply_change_preserves_run_accounting(initialized):
         )
     after = load_project_state(initialized)
     assert after.active_run_id == "RUN-KEEP"
-    assert after.tokens_used == 42
+    assert after.tokens_used >= 42
+    ledger = load_yaml(initialized.state / "token-ledger.yaml", []) or []
+    assert any(row.get("phase") == "change-reconcile" for row in ledger)
 
 
 def test_review_pack_includes_new_untracked_file(initialized):
@@ -306,7 +320,12 @@ def test_lifecycle_skills_are_routed():
     assert "architecture-design" in architecture_prompt("prd")
     assert "create-feature-spec" in spec_bundle_prompt("prd", [])
     assert "spec-drift" in change_analysis_prompt("x", "ctx")
-    assert "reconcile" in reconcile_change_prompt("x", "requirement_change", "{}", "[]")
+    assert "reconcile" in reconcile_change_prompt(
+        "x",
+        "requirement_change",
+        stage_dir=".sdd/runtime/reconcile/CR-TEST",
+        affected_requirements=["REQ-001"],
+    )
     pack = ContextPack(task_id="T", feature_id="F", skill="implement-task")
     assert "implement-task" in repair_task_prompt(task, [], pack)
     assert "review-task" not in repair_task_prompt(task, [], pack)

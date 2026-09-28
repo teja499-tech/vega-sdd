@@ -2,6 +2,12 @@
 
 This file summarizes human-visible changes. Individual project specifications and commit links are recorded in the managed project's own change history.
 
+## [0.4.1] - 2026-09-28
+
+- Fix brownfield `sdd change --approve` reconcile hang/token burn: stage bundle/ADRs on disk, return slice updates the controller merges, stream progress, 300s reconcile timeout, and ledger ask/change tokens.
+- Warn when Graphify/Headroom are missing (token efficiency) and when nested Cursor would spawn reconcile.
+- Brownfield reconcile validates slice quality only and writes with `enforce_quality=False` so historical thin features are not re-blocked.
+
 ## [0.4.0] - 2026-09-27
 
 - Reorganize documentation around executable user journeys: add ChatGPT/Claude-assisted PRD discovery, greenfield/brownfield/defect/change/recovery/monorepo/delivery recipes, an exact CLI command reference, current sample output, a documentation index, and 0.4.0 verification evidence.

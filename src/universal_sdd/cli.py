@@ -427,9 +427,16 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
         try:
             import headroom  # noqa: F401
             headroom_state = "installed"
+            headroom_ok = True
         except ImportError:
             headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
+            headroom_ok = False
         console.print(f"Headroom: {headroom_state}")
+        if not shutil.which("graphify") or not headroom_ok:
+            console.print(
+                "[yellow]Token efficiency degraded: install Graphify and headroom-ai so "
+                "ask/change/task packs stay scoped and compressed.[/yellow]"
+            )
         if cfg.review_agent:
             console.print(f"Review agent: [bold]{cfg.review_agent.value}[/bold]")
         else:
@@ -650,8 +657,16 @@ def change(
         return
     cr.approved = True
     cr.status = "approved"
+    from .reconcile import nested_cursor_agent
+    if nested_cursor_agent() and cr.classification != "implementation_defect":
+        console.print(
+            "[yellow]Warning: nested Cursor agent detected. Reconcile may hang; "
+            "prefer a host terminal for `sdd change --approve`.[/yellow]"
+        )
+    if cr.classification != "implementation_defect":
+        console.print("[cyan]Reconciling approved change (slice merge, 300s timeout)…[/cyan]")
     try:
-        applied = apply_change(root, cr)
+        applied = apply_change(root, cr, on_event=_event_printer)
     except RuntimeError as exc:
         _fail(str(exc), 2)
     console.print(f"[green]{applied.id} applied.[/green]")

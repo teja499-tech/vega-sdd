@@ -101,17 +101,19 @@ class MockAdapter(AgentAdapter):
             }
             text = json.dumps(payload)
         elif "RECONCILE_CHANGE_JSON" in prompt:
-            import re
-            # Deterministic test fixture: preserve current spec payload if present.
-            bundle = {
-                "product": {"name":"Demo Product","summary":"Generated from the PRD as a notes service a user can create and list against.","users":["User"],"capabilities":["Core workflow"],"workflows":["User completes core workflow"],"constraints":[],"assumptions":[],"open_questions":[]},
-                "requirements": [{"id":"REQ-001","title":"Core workflow","statement":"The system shall support the core workflow so a user can complete the primary notes path.","kind":"functional","priority":"must","source":"PRD","acceptance_criteria":["AC-001: Core workflow succeeds."]}],
-                "architecture_summary":"FastAPI service using the selected architecture decisions.",
-                "features": [{"id":"F001","name":"Foundation","summary":"Stand up the service foundation so a user can create and list notes through a tested HTTP API.","requirements":["REQ-001"],"depends_on":[],"invariants":["Notes persist for the lifetime of the process and list returns created records."],"non_goals":["Multi-user auth and search are out of scope for this foundation."],"test_matrix":["Create note happy path","List empty then populated","Invalid payload rejected"],"api_contract":"POST /notes {title} -> 201; GET /notes -> 200 list.","tasks":[{"id":"TASK-F001-001","feature_id":"F001","title":"Implement foundation","description":"Add the notes HTTP handlers, persistence, and unit tests that prove create/list plus invalid payload rejection.","implements":["REQ-001"],"depends_on":[],"verification":["Tests pass for create, list, and invalid payload"]}]}],
-                "test_strategy":["Unit tests","Integration tests"],"security_principles":["Least privilege"],"release_criteria":["All must requirements verified"]
-            }
-            arch = [{"id":"ARCH-001","category":"backend","question":"Which backend framework should the project use?","rationale":"Choose a maintainable application backend.","requirements":["API","testing"],"options":[{"name":"FastAPI","summary":"Python async API framework","strengths":["Python ecosystem"],"tradeoffs":["Less opinionated"],"fit":"high"}],"recommendation":"FastAPI","recommendation_reason":"Good fit for a Python-first service.","selected":"FastAPI","selected_reason":"Approved","status":"selected"}]
-            text = json.dumps({"bundle": bundle, "architecture_decisions": arch, "invalidate_tasks": ["TASK-F001-001"], "notes": ["Applied approved change"]})
+            text = json.dumps({
+                "requirement_updates": [
+                    {
+                        "id": "REQ-001",
+                        "statement": "The system shall support the core workflow so a user can complete the primary notes path after the approved change.",
+                    }
+                ],
+                "architecture_decision_updates": [],
+                "feature_updates": [],
+                "design_document_updates": {},
+                "invalidate_tasks": ["TASK-F001-001"],
+                "notes": ["Applied approved change"],
+            })
         elif "CHANGE_ANALYSIS_JSON" in prompt:
             text = json.dumps({
                 "classification": "implementation_defect",

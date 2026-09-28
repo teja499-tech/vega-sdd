@@ -186,9 +186,16 @@ def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -
         _render_architecture(paths, decisions)
 
 
-def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+def _render_spec_bundle(
+    paths: SDDPaths,
+    bundle: SpecBundle,
+    *,
+    preserve_verification: bool = False,
+    enforce_quality: bool = True,
+) -> None:
     from .spec_quality import assert_spec_quality
-    assert_spec_quality(bundle)
+    if enforce_quality:
+        assert_spec_quality(bundle)
     product = bundle.product
     (paths.product / "vision.md").write_text(
         f"# {product.name}\n\n{product.summary}\n\n## Users\n{_md_list(product.users)}\n\n## Capabilities\n{_md_list(product.capabilities)}\n",
@@ -273,9 +280,20 @@ def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verific
     render_history(paths)
 
 
-def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+def write_spec_bundle(
+    paths: SDDPaths,
+    bundle: SpecBundle,
+    *,
+    preserve_verification: bool = False,
+    enforce_quality: bool = True,
+) -> None:
     with projection_transaction(paths):
-        _render_spec_bundle(paths, bundle, preserve_verification=preserve_verification)
+        _render_spec_bundle(
+            paths,
+            bundle,
+            preserve_verification=preserve_verification,
+            enforce_quality=enforce_quality,
+        )
 
 
 def project_context(paths: SDDPaths, max_chars: int = 30000) -> str:

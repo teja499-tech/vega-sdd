@@ -152,8 +152,11 @@ def test_pause_request_survives_task_save(initialized):
 
 def test_invalid_change_preserves_approved_state(initialized):
     p=initialized; before=p.features_file.read_bytes()
-    bundle=load_yaml(p.spec_bundle_file); bundle['features'][0]['depends_on']=['F001']
-    a=Scripted(p.root); a.run=lambda *args,**kwargs:AgentResult(success=True,text=json.dumps({'bundle':bundle,'invalidate_tasks':[]}))
+    # Cyclic feature dependency via slice update should fail validation before write.
+    a=Scripted(p.root); a.run=lambda *args,**kwargs:AgentResult(success=True,text=json.dumps({
+        'feature_updates':[{'id':'F001','depends_on':['F001']}],
+        'invalidate_tasks':[],
+    }))
     cr=ChangeRequest(id='CR-BAD',description='change',classification='requirement_change',approved=True)
     with patch('universal_sdd.orchestrator.get_adapter',return_value=a):
         with pytest.raises(RuntimeError,match='before mutation'): apply_change(p.root,cr)
@@ -161,8 +164,10 @@ def test_invalid_change_preserves_approved_state(initialized):
 
 def test_affected_task_invalidated_even_if_agent_omits_it(initialized):
     p=initialized; fs=load_features(p);fs[0].tasks[0].status=ItemStatus.verified;dump_yaml(p.features_file,fs)
-    bundle=load_yaml(p.spec_bundle_file)
-    a=Scripted(p.root);a.run=lambda *args,**kwargs:AgentResult(success=True,text=json.dumps({'bundle':bundle,'invalidate_tasks':[]}))
+    a=Scripted(p.root);a.run=lambda *args,**kwargs:AgentResult(success=True,text=json.dumps({
+        'requirement_updates':[{'id':'REQ-001','statement':'Updated core requirement statement for the approved change.'}],
+        'invalidate_tasks':[],
+    }))
     cr=ChangeRequest(id='CR-CHANGE',description='change',classification='requirement_change',affected_requirements=['REQ-001'],approved=True)
     with patch('universal_sdd.orchestrator.get_adapter',return_value=a): apply_change(p.root,cr)
     assert load_features(p)[0].tasks[0].status==ItemStatus.invalidated

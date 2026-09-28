@@ -546,12 +546,15 @@ def ask_project(root: Path, question: str) -> str:
     from .compress import compress_for_prompt
     from .project_graph import graph_context
     from .prompts import ask_architect_prompt
+    state = load_project_state(paths)
     context = compress_for_prompt(
         paths,
         project_context(paths) + "\n\n" + graph_context(paths, question),
         label="ask-context",
     )
-    result = invoke_agent(adapter, ask_architect_prompt(question, context), root, writable=False, mode="ask")
+    prompt = ask_architect_prompt(question, context)
+    result = invoke_agent(adapter, prompt, root, writable=False, mode="ask")
+    record_usage(paths, state, task_id=None, phase="ask", prompt=prompt, result=result)
     if not result.success:
         raise RuntimeError(result.text or "Ask agent failed")
     Journal(paths.event_log).append("project_asked", question=question[:200])
@@ -578,12 +581,13 @@ _CHANGE_JSON_KEYS = {
 }
 
 
-def _change_analysis_json(adapter, paths: SDDPaths, prompt: str) -> dict:
+def _change_analysis_json(adapter, paths: SDDPaths, prompt: str, state: ProjectState) -> dict:
     """Ask mode returns JSON more reliably than plan mode. Retry once."""
     current = prompt
     last = ""
     for attempt in range(2):
         result = invoke_agent(adapter, current, paths.root, writable=False, mode="ask")
+        record_usage(paths, state, task_id=None, phase="change-analyze", prompt=current, result=result)
         last = result.text or ""
         if not result.success:
             raise RuntimeError(last or "Change analysis agent failed")
@@ -609,9 +613,21 @@ def analyze_change(root: Path, description: str) -> ChangeRequest:
     paths = SDDPaths(root)
     config = load_config(paths)
     from .workspace import require_approved_capabilities
+    from .project_graph import graph_context
     require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
-    data = _change_analysis_json(adapter, paths, change_analysis_prompt(description, project_context(paths)))
+    state = load_project_state(paths)
+    context = compress_for_prompt(
+        paths,
+        project_context(paths) + "\n\n" + graph_context(paths, description),
+        label="change-context",
+    )
+    data = _change_analysis_json(
+        adapter,
+        paths,
+        change_analysis_prompt(description, context),
+        state,
+    )
     cr = ChangeRequest(
         id=f"CR-{uuid.uuid4().hex[:6].upper()}",
         description=description,
@@ -624,7 +640,7 @@ def analyze_change(root: Path, description: str) -> ChangeRequest:
 
 
 @single_writer
-def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
+def apply_change(root: Path, cr: ChangeRequest, *, on_event: Callable[[AgentEvent], None] | None = None) -> ChangeRequest:
     paths = SDDPaths(root)
     config = load_config(paths)
     journal = Journal(paths.event_log)
@@ -671,24 +687,52 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     old_tasks = {t.id: t for f in old_features.values() for t in f.tasks}
 
     from .workspace import require_approved_capabilities
+    from .reconcile import (
+        RECONCILE_TIMEOUT_SECONDS,
+        merge_reconcile_slices,
+        nested_cursor_agent,
+        stage_reconcile_inputs,
+    )
     require_approved_capabilities(root, config.primary_agent)
+    if nested_cursor_agent():
+        journal.append("nested_cursor_warning", change_id=cr.id)
+        if os.environ.get("SDD_BLOCK_NESTED_CURSOR", "").strip().lower() in {"1", "true", "yes"}:
+            raise RuntimeError(
+                "Nested Cursor agent detected. Run `sdd change --approve` from a host terminal "
+                "(not inside an active Cursor agent session) so reconcile does not hang."
+            )
+    stage_dir = stage_reconcile_inputs(paths, cr.id, bundle_data, decision_data)
+    relative_stage = str(stage_dir.relative_to(paths.root))
+    prompt = reconcile_change_prompt(
+        cr.description,
+        cr.classification,
+        stage_dir=relative_stage,
+        affected_requirements=cr.affected_requirements,
+        affected_features=cr.affected_features,
+        affected_tasks=cr.affected_tasks,
+        proposed_changes=cr.proposed_changes,
+    )
     adapter = get_adapter(config.primary_agent, root)
+    adapter.timeout_seconds = min(getattr(adapter, "timeout_seconds", RECONCILE_TIMEOUT_SECONDS) or RECONCILE_TIMEOUT_SECONDS, RECONCILE_TIMEOUT_SECONDS)
+    state = load_project_state(paths)
     result = invoke_agent(
         adapter,
-        reconcile_change_prompt(cr.description, cr.classification, str(bundle_data), str(decision_data)),
+        prompt,
         root,
         writable=False,
         mode="plan",
+        on_event=on_event,
     )
+    record_usage(paths, state, task_id=None, phase="change-reconcile", prompt=prompt, result=result)
     if not result.success:
         raise RuntimeError(result.text)
     data = extract_json(result.text)
-    from .spec_quality import assert_spec_quality
-    bundle = SpecBundle.model_validate(data["bundle"])
-    assert_spec_quality(bundle)
-    decisions = [ArchitectureDecision.model_validate(x) for x in data.get("architecture_decisions", decision_data)]
-    invalidated = set(data.get("invalidate_tasks", [])) | set(cr.affected_tasks)
+    from .spec_quality import assert_reconcile_slice_quality
     old_bundle = SpecBundle.model_validate(bundle_data)
+    base_decisions = [ArchitectureDecision.model_validate(x) for x in decision_data]
+    bundle, decisions = merge_reconcile_slices(old_bundle, base_decisions, data)
+    assert_reconcile_slice_quality(old_bundle, bundle, data)
+    invalidated = set(data.get("invalidate_tasks", [])) | set(cr.affected_tasks)
     old_reqs = {r.id: r.model_dump(exclude={"status"}) for r in old_bundle.requirements}
     changed_reqs = set(cr.affected_requirements) | {r.id for r in bundle.requirements
         if old_reqs.get(r.id) != r.model_dump(exclude={"status"})}
@@ -742,7 +786,7 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
             raise RuntimeError("Change rejected before mutation: " + "; ".join(report.errors))
     with projection_transaction(paths):
         write_architecture(paths, decisions)
-        write_spec_bundle(paths, bundle, preserve_verification=True)
+        write_spec_bundle(paths, bundle, preserve_verification=True, enforce_quality=False)
     state = load_project_state(paths)
     state.run_status = RunStatus.ready
     state.current_feature = None

@@ -78,3 +78,73 @@ def assert_spec_quality(bundle: SpecBundle) -> None:
     errors = spec_quality_errors(bundle)
     if errors:
         raise ValueError("Specification bundle is too thin:\n- " + "\n- ".join(errors))
+
+
+def assert_reconcile_slice_quality(
+    before: SpecBundle,
+    after: SpecBundle,
+    slice_data: dict,
+) -> None:
+    """Validate only new/updated slice items so brownfield history is not re-blocked."""
+    errors: list[str] = []
+    before_reqs = {r.id: r for r in before.requirements}
+    before_features = {f.id: f for f in before.features}
+    after_reqs = {r.id: r for r in after.requirements}
+    after_features = {f.id: f for f in after.features}
+
+    for raw in slice_data.get("requirement_updates") or []:
+        if not isinstance(raw, dict) or "id" not in raw:
+            continue
+        rid = str(raw["id"])
+        req = after_reqs.get(rid)
+        if req is None:
+            continue
+        old = before_reqs.get(rid)
+        if old is None or old.model_dump(exclude={"status"}) != req.model_dump(exclude={"status"}):
+            errors.extend(_requirement_errors(req))
+
+    for raw in slice_data.get("feature_updates") or []:
+        if not isinstance(raw, dict) or "id" not in raw:
+            continue
+        fid = str(raw["id"])
+        feature = after_features.get(fid)
+        if feature is None:
+            continue
+        old = before_features.get(fid)
+        if old is None:
+            errors.extend(_feature_errors(feature))
+            continue
+        # Full feature replace/new tasks must meet quality; summary-only overlays on
+        # historical features are allowed without rewriting contracts.
+        if "tasks" in raw or old.model_dump(exclude={"status", "tasks"}) != feature.model_dump(
+            exclude={"status", "tasks"}
+        ):
+            if not feature_has_contracts(feature) and not feature_has_contracts(old):
+                # Keep historical thinness; do not invent contracts during reconcile.
+                pass
+            elif not feature_has_contracts(feature) and feature_has_contracts(old):
+                errors.append(
+                    f"{feature.id}: feature update dropped invariants/non-goals/test matrix/API/UX contract"
+                )
+            if _too_short(feature.summary, MIN_SUMMARY):
+                errors.append(f"{feature.id}: feature summary is title-only")
+        touched_task_ids = set()
+        for task_raw in raw.get("tasks") or []:
+            if isinstance(task_raw, dict) and "id" in task_raw:
+                touched_task_ids.add(str(task_raw["id"]))
+        old_tasks = {t.id: t for t in old.tasks}
+        for task in feature.tasks:
+            if task.id not in touched_task_ids and task.id in old_tasks:
+                continue
+            if task.id not in old_tasks or old_tasks[task.id].model_dump(
+                exclude={"status", "attempts", "evidence", "working_set", "last_findings"}
+            ) != task.model_dump(
+                exclude={"status", "attempts", "evidence", "working_set", "last_findings"}
+            ):
+                errors.extend(_task_errors(task))
+
+    if slice_data.get("product_update") and _too_short(after.product.summary, MIN_SUMMARY):
+        errors.append("Product summary is too thin to implement against")
+
+    if errors:
+        raise ValueError("Reconcile slice is too thin:\n- " + "\n- ".join(errors))
