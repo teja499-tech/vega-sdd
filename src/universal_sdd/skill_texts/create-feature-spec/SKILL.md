@@ -26,9 +26,10 @@ Every feature object needs:
 - `api_contract` or `ux_contract` or both when the feature has an interface. Use the api-design or ux-design skill for the shape.
 - `target_files` — existing paths when the repository already has them.
 - `tasks` — one bounded agent run each.
+- Each task's `skills` — only task-relevant project/domain runbooks present under `.agents/skills/`; use an empty list when no specialist skill is required.
 
 ## Task contract
-Each task needs an id `TASK-<feature>-NNN`, a description that names files, behavior, and tests, `implements` requirement ids, `verification` a reviewer can check, and `check_paths` when a narrow test file exists.
+Each task needs an id `TASK-<feature>-NNN`, a description that names files, behavior, and tests, `implements` requirement ids, `verification` a reviewer can check, `check_paths` when a narrow test file exists, and no more than eight explicitly selected skills.
 
 Reject:
 
@@ -43,8 +44,9 @@ Reject:
 4. If the feature exposes HTTP or RPC, fill `api_contract` using the api-design skill.
 5. If it has a screen, fill `ux_contract` using the ux-design skill.
 6. If it persists data, name entities using the data-model skill.
-7. Split work so each task's diff is reviewable in one pass.
-8. Keep dependencies a DAG. Foundation before behavior. Behavior before release docs.
+7. Select specialist task skills by their activation descriptions. Never invent a skill name or attach the whole catalog.
+8. Split work so each task's diff is reviewable in one pass.
+9. Keep dependencies a DAG. Foundation before behavior. Behavior before release docs.
 
 ## Checklist
 - [ ] No title-only feature or task

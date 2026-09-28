@@ -213,6 +213,12 @@ Scaffold writes runbooks under `.agents/skills/`. A later `sdd scaffold` adds mi
 
 Agent prompts include the skill name and its routing description. The agent reads `.agents/skills/<name>/SKILL.md` when the task matches. The controller does not paste the full runbook into every prompt.
 
+Each generated task may also declare a bounded `skills` list. This is the extension point for a project- or domain-specific runbook such as healthcare compliance, a repository migration convention, or a hardware validation procedure. The controller fails closed if a named runbook is missing. Skills with explicit `routing.phases` and `routing.any` frontmatter can be selected automatically from task text; lifecycle skills remain controller-selected.
+
+Vega ships focused cross-cutting runbooks for API/data/UX/security plus reliability, performance, E2E, migration safety, and AI-agent systems. This follows the useful ECC pattern—small skills with clear activation boundaries and specialized review roles—without loading a large universal catalog into every task. Knowledge lives in skills, review perspective lives in roles, and permissions/state transitions remain enforced in Python.
+
+Project-local skill and role files are instructions, not passive documentation. `sdd project setup` records a digest of `AGENTS.md`, `.agents/roles/`, and `.agents/skills/` with the workspace approval. If any of them changes, a real-agent run stops until you review the change and rerun `sdd project configure --file .sdd/workspace.yaml` (or the interactive setup).
+
 ## Clarifications and retries
 
 Unresolved material questions block `sdd start` until they are answered:

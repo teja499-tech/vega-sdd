@@ -42,9 +42,17 @@ Repository
 
 ## Ownership boundaries
 
-The controller owns canonical state transitions. An agent may edit application code during writable tasks, but it is instructed not to mark `.sdd/state` complete. This protects recovery from agent self-reporting.
+The controller owns canonical state transitions. An agent may edit application code during writable tasks, but it is instructed not to mark `.sdd/state` complete. The mutation guard protects controller runtime baselines and projection recovery records as well as canonical state. This protects recovery from agent self-reporting.
 
 Architecture/spec generation is returned as structured JSON and validated with Pydantic before the controller writes canonical artifacts. Approved change reconciliation uses the same pattern.
+
+## Capability routing
+
+The controller selects one lifecycle skill for the current phase and a small set of task/domain skills. A task can declare explicit skill names; skills can also expose phase-and-trigger routing metadata. Missing explicit skills block execution. The context pack carries compact descriptions and exact paths, so the agent loads only the selected runbooks.
+
+Roles are independent of skills: developer or QA is the primary perspective, with security, integration, reliability, performance, E2E, or agent-system reviewers added when the routed risks require them. Roles and skills guide judgment; they never grant tools, approve a change, or write canonical state. The controller and adapter enforce those boundaries.
+
+For real-agent projects, workspace approval binds the execution policy and a digest of the governing agent instructions, roles, and skills. Editing a capability invalidates approval. This makes project-local extensions reviewable instead of silently executable.
 
 ## State model
 

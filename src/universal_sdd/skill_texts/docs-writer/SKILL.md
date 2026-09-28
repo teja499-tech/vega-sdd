@@ -1,6 +1,9 @@
 ---
 name: docs-writer
 description: Write the project README and developer guide from compose files, env examples, routes, and approved operations design. Use for documentation tasks, not for feature implementation.
+routing:
+  phases: [implement, repair, review]
+  any: [readme, docs, guide, documentation, runbook]
 ---
 
 # Docs Writer

@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .context_pack import ContextPack
 from .models import ArchitectureDecision, Feature, Task
-from .skill_library import lifecycle_skill, skill_catalog
+from .skill_library import available_task_skills, lifecycle_skill, role_catalog, skill_catalog
 
 
 
@@ -45,7 +45,10 @@ def architecture_prompt(prd: str, repo_summary: str = "") -> str:
     skill = lifecycle_skill("architecture")
     return f"""
 You are the Product Architect for Vega SDD.
+Load the architect role contract from `.agents/roles/architect.md`.
 Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Role contract:
+{role_catalog("architect")}
 Skill catalog:
 {skill_catalog(skill)}
 Analyze the PRD and identify ONLY architecture decisions that materially matter to this project.
@@ -87,14 +90,25 @@ Rules:
 """.strip()
 
 
-def spec_bundle_prompt(prd: str, decisions: list[ArchitectureDecision], repo_summary: str = "") -> str:
+def spec_bundle_prompt(
+    prd: str,
+    decisions: list[ArchitectureDecision],
+    repo_summary: str = "",
+    *,
+    skill_root: Path | None = None,
+) -> str:
     selected = [d.model_dump(mode="json") for d in decisions]
     skill = lifecycle_skill("spec")
     return f"""
 You are the Specification Lead for Vega SDD.
+Load the planner role contract from `.agents/roles/planner.md`.
 Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
+Role contract:
+{role_catalog("planner")}
 Skill catalog:
-{skill_catalog(skill, "api-design", "ux-design", "data-model")}
+{skill_catalog(skill, "api-design", "ux-design", "data-model", root=skill_root)}
+Available task skills (select only when the task materially matches; use an empty list otherwise):
+{available_task_skills(skill_root)}
 Create the durable specification bundle from the PRD and approved architecture decisions.
 Return ONLY one JSON object. No markdown fences.
 Marker: SPEC_BUNDLE_JSON
@@ -132,6 +146,7 @@ Required shape:
           "id":"TASK-F001-001", "feature_id":"F001", "title":"...",
           "description":"implementation contract: files, behavior, and tests — not a title restatement",
           "implements":["REQ-..."], "depends_on":["TASK-..."],
+          "skills":["task-relevant-skill"],
           "verification":["specific deterministic check"],
           "check_paths":["optional/test/file.py"]
         }}

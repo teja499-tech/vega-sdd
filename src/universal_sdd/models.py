@@ -129,6 +129,21 @@ class Requirement(BaseModel):
 
 
 class Task(BaseModel):
+    @field_validator("skills")
+    @classmethod
+    def safe_skills(cls, values):
+        import re
+        cleaned = []
+        for value in values:
+            value = str(value).strip()
+            if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", value):
+                raise ValueError(f"Unsafe skill name: {value}")
+            if value not in cleaned:
+                cleaned.append(value)
+        if len(cleaned) > 8:
+            raise ValueError("A task may name at most 8 skills")
+        return cleaned
+
     id: str
     feature_id: str
     title: str
@@ -138,6 +153,7 @@ class Task(BaseModel):
     verification: list[str] = Field(default_factory=list)
     check_paths: list[str] = Field(default_factory=list)
     check_command: str | None = None
+    skills: list[str] = Field(default_factory=list)
     working_set: list[str] = Field(default_factory=list)
     last_findings: list[dict[str, Any]] = Field(default_factory=list)
     status: ItemStatus = ItemStatus.pending

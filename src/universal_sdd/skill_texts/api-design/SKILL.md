@@ -1,6 +1,9 @@
 ---
 name: api-design
 description: Lock HTTP or RPC contracts before implementation. Use when a feature adds routes, request bodies, or error codes. Reviewers check this contract; they do not invent one.
+routing:
+  phases: [implement, repair, review]
+  any: [api, route, openapi, endpoint, http, rpc, webhook]
 ---
 
 # API Design

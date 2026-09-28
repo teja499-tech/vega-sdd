@@ -1,4 +1,4 @@
-> **Vega SDD 0.4.0:** Gemini CLI and GitHub Copilot CLI are primary adapters. `python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change`. Prompts include skill metadata only; runbooks stay in `.agents/skills/`.
+> **Vega SDD 0.4.0:** Gemini CLI and GitHub Copilot CLI are primary adapters. `python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change`. Prompts include selected role/skill metadata only; runbooks stay in `.agents/` and are bound to workspace approval.
 
 > **Vega SDD 0.3.0:** This guide describes the framework behavior; see [project lifecycle](PROJECT_LIFECYCLE.md) for current delivery policies and [verification](VERIFICATION_0.2.0.md) for the original 0.2.0 test baseline. Version-specific notes below are historical.
 

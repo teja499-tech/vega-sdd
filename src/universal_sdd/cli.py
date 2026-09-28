@@ -292,7 +292,7 @@ def init(
         console.print("\n[bold]3/4 Specification generation[/bold]")
         bundle = _require_model(
             adapter,
-            spec_bundle_prompt(augmented_prd, decisions, repo_summary),
+            spec_bundle_prompt(augmented_prd, decisions, repo_summary, skill_root=root),
             SpecBundle.model_validate,
             "specification bundle",
             paths,
@@ -331,7 +331,14 @@ def init(
             console.print("[yellow]Project contains unresolved questions/decisions. Review before autonomous development.[/yellow]")
         else:
             console.print("[green]Project is ready for implementation.[/green]")
-        console.print("Next: [bold]sdd start[/bold]  |  inspect: [bold]sdd status[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold]")
+        console.print("Inspect: [bold]sdd status[/bold], [bold]sdd requirements[/bold], [bold]sdd architecture[/bold], [bold]sdd roadmap[/bold], [bold]sdd verify[/bold]")
+        if agent == AgentName.mock:
+            console.print("Next: [bold]sdd start[/bold] (the mock exercises lifecycle only; it does not build application code)")
+        else:
+            console.print(
+                "Next: [bold]sdd project setup[/bold], review/commit the generated baseline, "
+                "then [bold]sdd repo branch <scope>[/bold] and [bold]sdd start --max-tasks 1[/bold]."
+            )
     finally:
         if not finished:
             failed = load_project_state(paths)
@@ -341,6 +348,7 @@ def init(
 
 
 @app.command("scaffold")
+@single_writer
 def scaffold_cmd(
     root: Path = typer.Option(Path("."), "--root"),
     force: bool = typer.Option(False, "--force", help="Overwrite customized skills and roles, not only stubs."),
@@ -657,6 +665,7 @@ app.add_typer(graph_app, name="graph")
 
 
 @graph_app.command("refresh")
+@single_writer
 def graph_refresh(root: Path = typer.Option(Path("."), "--root")) -> None:
     """Write the traceability corpus and run graphify (or graphify update)."""
     from .graphify_index import refresh_knowledge_graph
@@ -699,6 +708,7 @@ def ask(
 
 
 @app.command()
+@single_writer
 def clarify(
     clarification_id: Optional[str] = typer.Argument(None, help="Clarification id such as Q1 or ARCH-001."),
     answer: Optional[str] = typer.Option(None, "--answer", help="Answer to record."),

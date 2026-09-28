@@ -406,8 +406,18 @@ def run_development(
                     break
                 findings = review_data.get("findings", [])
                 task.last_findings = [f for f in findings if isinstance(f, dict)]
-                skill, extra = skills_for_phase("repair", task)
-                pack = pack.model_copy(update={"skill": skill, "extra_skills": extra, "last_findings": task.last_findings})
+                skill, extra = skills_for_phase("repair", task, root)
+                from .skill_library import role_catalog, roles_for_phase, skill_catalog
+                role, extra_roles = roles_for_phase("repair", extra)
+                pack = pack.model_copy(update={
+                    "skill": skill,
+                    "extra_skills": extra,
+                    "role": role,
+                    "extra_roles": extra_roles,
+                    "skill_descriptions": skill_catalog(skill, *extra, root=root),
+                    "role_descriptions": role_catalog(role, extra_roles),
+                    "last_findings": task.last_findings,
+                })
                 journal.append("review_failed", task=task.id, findings=findings)
                 repair_count += 1
                 journal.append("repair_started", task=task.id, attempt=repair_count, skill=skill)
@@ -525,6 +535,7 @@ def retry_task(root: Path, task_id: str, *, keep_code: bool = True) -> Task:
     return target
 
 
+@single_writer
 def ask_project(root: Path, question: str) -> str:
     paths = SDDPaths(root)
     config = load_config(paths)
@@ -591,6 +602,7 @@ def _change_analysis_json(adapter, paths: SDDPaths, prompt: str) -> dict:
     raise RuntimeError("Change analysis did not return JSON. See .sdd/runtime/change-analysis.txt")
 
 
+@single_writer
 def analyze_change(root: Path, description: str) -> ChangeRequest:
     paths = SDDPaths(root)
     config = load_config(paths)

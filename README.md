@@ -16,6 +16,14 @@ sdd doctor
 cd path/to/your-project
 sdd init
 sdd status
+sdd requirements
+sdd architecture
+sdd roadmap
+sdd verify
+sdd project setup
+# Review generated policy and files, then commit the baseline.
+sdd repo branch first-scope
+sdd start --max-tasks 1
 ```
 
 For a deterministic trial without a coding-agent login, create a disposable project with a `PRD.md` and run:
@@ -62,7 +70,7 @@ sdd scaffold               # add missing skills and upgrade old framework checkl
 sdd agent use cursor       # cursor, codex, claude, gemini, or copilot
 ```
 
-Run `sdd --help` for the full command list. The project state lives under `.sdd/`. Graphify writes `graphify-out/` and does not replace that state. Reusable roles and skills live under `.agents/`. Prompts carry a skill name and description; the agent loads `.agents/skills/<name>/SKILL.md` when the task matches. Vendor-specific files are thin adapters. One primary coding agent writes at a time; separate reviewer roles and deterministic checks inspect the work.
+Run `sdd --help` for the full command list. The project state lives under `.sdd/`. Graphify writes `graphify-out/` and does not replace that state. Reusable roles and skills live under `.agents/`. Task contracts may name project/domain skills explicitly, while routing metadata selects cross-cutting security, reliability, performance, E2E, migration, AI-agent, API, data, UX, and documentation runbooks by risk. Prompts carry only the selected role/skill descriptions; the agent loads those files on demand. The approved workspace policy is bound to a digest of `AGENTS.md`, roles, and skills, so capability changes require review before the next real-agent run. Vendor-specific files are thin adapters. One primary coding agent writes at a time; separate reviewer roles and deterministic checks inspect the work.
 
 Optional local tools, installed separately:
 

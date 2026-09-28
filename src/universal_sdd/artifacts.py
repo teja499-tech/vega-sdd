@@ -76,6 +76,8 @@ def _load_persisted_tx(paths: SDDPaths) -> dict[str, bytes] | None:
     marker = _tx_root(paths) / "active.json"
     if not marker.exists():
         return None
+    if marker.is_symlink():
+        raise ValueError("Projection transaction marker must not be a symlink")
     try:
         data = json.loads(marker.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -85,11 +87,23 @@ def _load_persisted_tx(paths: SDDPaths) -> dict[str, bytes] | None:
     snapshot: dict[str, bytes] = {}
     files_dir = _tx_root(paths) / "files"
     for rel in data.get("files") or []:
-        if not isinstance(rel, str) or ".." in Path(rel).parts:
-            continue
-        path = files_dir / rel
-        if path.is_file():
-            snapshot[rel] = path.read_bytes()
+        if not isinstance(rel, str):
+            raise ValueError("Projection transaction contains a non-string path")
+        relative = Path(rel)
+        allowed_root = relative.parts[:1] in {(".sdd",), ("graphify-corpus",)}
+        excluded = rel == ".sdd/state/project.yaml" or any(
+            rel.startswith(f".sdd/{name}/") for name in _SKIP_SDD_DIRS
+        )
+        if relative.is_absolute() or ".." in relative.parts or not allowed_root or excluded:
+            raise ValueError(f"Unsafe projection transaction path: {rel}")
+        path = files_dir
+        for part in relative.parts:
+            path = path / part
+            if path.is_symlink():
+                raise ValueError(f"Projection transaction path is a symlink: {rel}")
+        if not path.is_file():
+            raise ValueError(f"Projection transaction snapshot is incomplete: {rel}")
+        snapshot[rel] = path.read_bytes()
     return snapshot
 
 
@@ -103,7 +117,11 @@ def recover_projection_transaction(paths: SDDPaths) -> bool:
     """Restore a crashed projection write if a durable transaction marker remains."""
     if not paths.sdd.exists():
         return False
-    snapshot = _load_persisted_tx(paths)
+    try:
+        snapshot = _load_persisted_tx(paths)
+    except (OSError, ValueError, TypeError):
+        _clear_tx(paths)
+        return False
     if snapshot is None:
         return False
     _restore_canonical(paths, snapshot)
@@ -218,6 +236,7 @@ def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verific
                 "",
                 f"- Implements: {', '.join(task.implements) or 'none'}",
                 f"- Depends on: {', '.join(task.depends_on) or 'none'}",
+                f"- Skills: {', '.join(task.skills) or 'controller-routed defaults'}",
                 f"- Verification: {', '.join(task.verification) or 'not specified'}",
                 "",
             ]

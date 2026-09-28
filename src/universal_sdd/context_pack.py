@@ -10,7 +10,14 @@ from pydantic import BaseModel, Field
 
 from .graphify_index import query_knowledge_graph
 from .models import Feature, Task
-from .skill_library import lifecycle_skill, skill_catalog
+from .skill_library import (
+    discover_skills,
+    lifecycle_skill,
+    role_catalog,
+    roles_for_phase,
+    routed_skills,
+    skill_catalog,
+)
 from .storage import SDDPaths, load_yaml
 
 
@@ -26,6 +33,10 @@ class ContextPack(BaseModel):
     feature_id: str
     skill: str = "implement-task"
     extra_skills: list[str] = Field(default_factory=list)
+    role: str = "developer"
+    extra_roles: list[str] = Field(default_factory=list)
+    skill_descriptions: str = ""
+    role_descriptions: str = ""
     acceptance_criteria: list[str] = Field(default_factory=list)
     files: list[str] = Field(default_factory=list)
     related_tests: list[str] = Field(default_factory=list)
@@ -41,7 +52,10 @@ class ContextPack(BaseModel):
         skills = [self.skill, *self.extra_skills]
         sections = {
             "intro": "Before Read, Grep, or Glob, run `graphify query` (or `graphify path` / `graphify explain`) when graphify-out/graph.json exists.",
-            "skills": "Skill catalog (name + when-to-load only):\n" + skill_catalog(*skills),
+            "roles": "Role contract:\n" + (self.role_descriptions or role_catalog(self.role, self.extra_roles)),
+            "skills": "Skill catalog (name + when-to-load only):\n" + (
+                self.skill_descriptions or skill_catalog(*skills)
+            ),
             "acceptance": "Acceptance criteria:\n" + _bounded_json(self.acceptance_criteria, RESERVED_AC_CHARS),
             "files": "Working set:\n" + _bounded_json(self.files[:MAX_FILES], 1500),
             "tests": "Related tests:\n" + _bounded_json(self.related_tests, 800),
@@ -55,8 +69,8 @@ class ContextPack(BaseModel):
             "graph": "Graphify subgraph:\n" + _truncate_field(self.graph_excerpt or "No scoped subgraph yet. Run sdd graph refresh.", 1500),
             "findings": "Last review findings:\n" + _bounded_json(self.last_findings, RESERVED_FINDINGS_CHARS),
         }
-        shrinkable = ["spec", "graph", "contracts", "files", "oos", "tests", "skills"]
-        reserved = {"acceptance", "findings"}
+        shrinkable = ["spec", "graph", "contracts", "files", "oos", "tests"]
+        reserved = {"roles", "skills", "acceptance", "findings"}
         if self.changed_files:
             reserved.add("changed")
         else:
@@ -69,7 +83,7 @@ class ContextPack(BaseModel):
             sections[key] = _truncate_field(sections[key], max(80, len(sections[key]) // 2))
             body = _join_sections(sections)
         if len(body) > limit:
-            keep = ("intro", "skills", "acceptance", "findings", "oos")
+            keep = ("intro", "roles", "skills", "acceptance", "findings", "oos")
             if self.changed_files:
                 keep = (*keep, "changed")
             body = _join_sections({k: sections[k] for k in keep})
@@ -115,27 +129,32 @@ def _bounded_json(value: Any, budget: int) -> str:
     return dumped if len(dumped) <= budget else _truncate_field(dumped, budget)
 
 
-def skills_for_phase(phase: str, task: Task | None = None) -> tuple[str, list[str]]:
+def skills_for_phase(phase: str, task: Task | None = None, root: Path | None = None) -> tuple[str, list[str]]:
     extra: list[str] = []
     blob = ""
     if task is not None:
         blob = f"{task.title} {task.description} {' '.join(task.verification)}".lower()
-        if any(token in blob for token in ("api", "route", "openapi", "endpoint", "http")):
-            extra.append("api-design")
-        if any(token in blob for token in ("ux", "ui", "page", "screen", "accessibility", "copy")):
-            extra.append("ux-design")
-        if any(token in blob for token in ("schema", "model", "migration", "database", "entity")):
-            extra.append("data-model")
-        if any(token in blob for token in ("readme", "docs", "guide", "documentation")):
-            extra.append("docs-writer")
-        if any(token in blob for token in ("auth", "secret", "threat", "security")):
-            extra.append("security-review")
-            extra.append("threat-model")
-    return lifecycle_skill(phase), extra
+        extra.extend(task.skills)
+        extra.extend(routed_skills(root, phase, blob))
+    primary = lifecycle_skill(phase)
+    extra = [name for name in dict.fromkeys(extra) if name != primary]
+    if len(extra) > 8:
+        raise RuntimeError(
+            f"Task routes to {len(extra)} specialist skills; split or narrow the task so no more than 8 apply."
+        )
+    if root is not None:
+        catalog = discover_skills(root)
+        missing = [name for name in [primary, *extra] if name not in catalog]
+        if missing:
+            raise RuntimeError(
+                "Task references missing skill runbook(s): " + ", ".join(missing)
+                + ". Add them under .agents/skills or remove them from the task contract."
+            )
+    return primary, extra
 
 
-def skills_for_task(task: Task, phase: str = "implement") -> tuple[str, list[str]]:
-    return skills_for_phase(phase, task)
+def skills_for_task(task: Task, phase: str = "implement", root: Path | None = None) -> tuple[str, list[str]]:
+    return skills_for_phase(phase, task, root)
 
 
 def _existing_paths(root: Path, relatives: list[str]) -> list[str]:
@@ -214,7 +233,8 @@ def _adr_ids(paths: SDDPaths) -> list[str]:
 
 
 def build_context_pack(paths: SDDPaths, task: Task, feature: Feature, *, phase: str = "implement") -> ContextPack:
-    skill, extra = skills_for_phase(phase, task)
+    skill, extra = skills_for_phase(phase, task, paths.root)
+    role, extra_roles = roles_for_phase(phase, extra)
     graph_excerpt = query_knowledge_graph(
         paths.root,
         f"{feature.id} {feature.name} {task.id} {task.title}. Acceptance: {' '.join(task.verification)}",
@@ -228,6 +248,8 @@ def build_context_pack(paths: SDDPaths, task: Task, feature: Feature, *, phase: 
             "AGENTS.md",
             f".agents/skills/{skill}/SKILL.md",
             *[f".agents/skills/{name}/SKILL.md" for name in extra],
+            f".agents/roles/{role}.md",
+            *[f".agents/roles/{name}.md" for name in extra_roles],
         ],
     )
     tests = [rel for rel in files if "test" in rel]
@@ -239,6 +261,10 @@ def build_context_pack(paths: SDDPaths, task: Task, feature: Feature, *, phase: 
         feature_id=feature.id,
         skill=skill,
         extra_skills=extra,
+        role=role,
+        extra_roles=extra_roles,
+        skill_descriptions=skill_catalog(skill, *extra, root=paths.root),
+        role_descriptions=role_catalog(role, extra_roles),
         acceptance_criteria=_acceptance_criteria(paths, task),
         files=unique_files,
         related_tests=unique_tests,
@@ -259,7 +285,8 @@ def rebuild_review_pack(
 ) -> ContextPack:
     """Rebuild the review pack from files that actually changed, including untracked."""
     base = pack or build_context_pack(paths, task, feature, phase="review")
-    skill, extra = skills_for_phase("review", task)
+    skill, extra = skills_for_phase("review", task, paths.root)
+    role, extra_roles = roles_for_phase("review", extra)
     declared = {
         *task.working_set,
         *feature.target_files,
@@ -268,6 +295,8 @@ def rebuild_review_pack(
         *base.related_tests,
         f".agents/skills/{skill}/SKILL.md",
         *[f".agents/skills/{name}/SKILL.md" for name in extra],
+        f".agents/roles/{role}.md",
+        *[f".agents/roles/{name}.md" for name in extra_roles],
         "AGENTS.md",
     }
     cleaned = []
@@ -297,6 +326,10 @@ def rebuild_review_pack(
         update={
             "skill": skill,
             "extra_skills": extra,
+            "role": role,
+            "extra_roles": extra_roles,
+            "skill_descriptions": skill_catalog(skill, *extra, root=paths.root),
+            "role_descriptions": role_catalog(role, extra_roles),
             "files": files,
             "related_tests": tests,
             "changed_files": cleaned,

@@ -119,6 +119,18 @@ def inside(root: Path, relative: str):
 
 def policy_path(root): return Path(root) / '.sdd/workspace.yaml'
 def policy_hash(root): return hashlib.sha256(policy_path(root).read_bytes()).hexdigest()
+def capability_hash(root):
+    """Bind approved execution to the agent instructions, roles, and skills it will load."""
+    root=Path(root);h=hashlib.sha256()
+    candidates=[]
+    agents=root/'AGENTS.md'
+    if agents.exists():candidates.append(agents)
+    for pattern in ('.agents/roles/*.md','.agents/skills/*/SKILL.md'):
+        candidates.extend(sorted(root.glob(pattern)))
+    for path in sorted(set(candidates),key=lambda p:p.relative_to(root).as_posix()):
+        if path.is_symlink() or not path.is_file():raise RuntimeError('Capability files must be regular files: '+str(path.relative_to(root)))
+        rel=path.relative_to(root).as_posix();h.update(rel.encode()+b'\0'+path.read_bytes()+b'\0')
+    return h.hexdigest()
 def load_workspace(root):
     config = Workspace.model_validate(load_yaml(policy_path(root)))
     for c in config.components:
@@ -126,6 +138,8 @@ def load_workspace(root):
         if c.artifact: inside(inside(Path(root), c.path), c.artifact)
     approval = load_yaml(Path(root) / '.sdd/state/workspace-approval.yaml', {}) or {}
     if approval.get('sha256') != policy_hash(root): raise RuntimeError('Policy changed or not approved; review and configure it')
+    if approval.get('capabilities_sha256') != capability_hash(root):
+        raise RuntimeError('Agent instructions, roles, or skills changed after approval; review them and reconfigure the project policy')
     return config
 
 def configure(root: Path, data: dict):
@@ -141,7 +155,9 @@ def configure(root: Path, data: dict):
         copy = root / '.sdd/history/policies' / (old+'.yaml'); copy.parent.mkdir(parents=True,exist_ok=True)
         copy.write_bytes(target.read_bytes())
     dump_yaml(target,config)
-    dump_yaml(root/'.sdd/state/workspace-approval.yaml',{'sha256':policy_hash(root),'approved_at':utcnow()})
+    dump_yaml(root/'.sdd/state/workspace-approval.yaml',{
+        'sha256':policy_hash(root),'capabilities_sha256':capability_hash(root),'approved_at':utcnow()
+    })
     return config
 
 def gaps(config):
@@ -198,6 +214,7 @@ def fingerprint(root):
             if subprocess.run(['git','-C',str(path),'status','--porcelain'],capture_output=True).stdout:raise RuntimeError('Dirty submodule: '+name)
         else:h.update(b'<deleted>')
     h.update(policy_hash(root).encode())
+    h.update(capability_hash(root).encode())
     return h.hexdigest()
 
 def run_checks(root, phase='all'):

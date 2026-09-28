@@ -70,6 +70,7 @@ def write_trace_corpus(paths: SDDPaths) -> Path:
             lines.append(
                 f"- {task.get('id')}: {task.get('title', '')} ({task.get('status', 'pending')}). "
                 f"Implements {', '.join(task.get('implements') or []) or 'none'}. "
+                f"Skills: {', '.join(task.get('skills') or []) or 'controller-routed defaults'}. "
                 f"Verification: {'; '.join(task.get('verification') or []) or 'none'}."
             )
         lines.append("")

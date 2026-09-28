@@ -44,12 +44,13 @@ Only then open files. Read or Grep is for a line you are about to change, not fo
 
 ## Procedure
 1. Read this skill, then the working-set files. Confirm the change fits the task description.
-2. If an invariant, API contract, or UX contract is missing and the task cannot be implemented without inventing product behavior, stop. Report the gap. Do not guess and do not edit the spec.
-3. Edit application code only. Match existing module layout, error types, and test style.
-4. Add or update the tests named by verification. Cover the happy path and the negative case the acceptance criterion names.
-5. Run the narrowest check in the pack (`check_paths` or the task test file). Do not start the full workspace suite unless the pack says this is the feature-closing task.
-6. If the check fails, fix the defect. Do not delete or weaken the assertion.
-7. Stop. Leave changes uncommitted. Do not create branches, tags, or `SDD-Task` trailers. Do not write `.sdd/`.
+2. Read the primary role and only the additional skill/role files named in the context pack. Treat their boundaries as part of the task contract.
+3. If an invariant, API contract, or UX contract is missing and the task cannot be implemented without inventing product behavior, stop. Report the gap. Do not guess and do not edit the spec.
+4. Edit application code only. Match existing module layout, error types, and test style.
+5. Add or update the tests named by verification. Cover the happy path and the negative case the acceptance criterion names.
+6. Run the narrowest check in the pack (`check_paths` or the task test file). Do not start the full workspace suite unless the pack says this is the feature-closing task.
+7. If the check fails, fix the defect. Do not delete or weaken the assertion.
+8. Stop. Leave changes uncommitted. Do not create branches, tags, or `SDD-Task` trailers. Do not write `.sdd/`.
 
 ## Contracts you must not invent
 - Route shapes, status codes, and error catalogs belong to `api-design` and the feature `api_contract`.

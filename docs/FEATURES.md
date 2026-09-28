@@ -70,15 +70,15 @@ Features contain requirements, dependencies, bounded tasks, and verification cri
 
 ## 7. Project-owned Agent Skills
 
-`/.agents/skills/` is canonical. Core runbooks cover implementation, review, feature specs, architecture, API, UX, data model, threat model, docs, and security review. Each file has a routing description, a directory map, a procedure, a checklist, and failure modes.
+`/.agents/skills/` is canonical. Core runbooks cover implementation, review, feature specs, architecture, API, UX, data model, threat model, docs, security, reliability, performance, E2E, migration safety, and AI-agent systems. Each file has a routing description, a procedure, and bounded failure modes.
 
-The controller injects the skill name and description. The agent loads the matching `SKILL.md` on demand.
+The controller injects the selected skill names and descriptions. Tasks can explicitly name project/domain skills; routing metadata can add cross-cutting skills by phase and risk. Missing skills and over-broad tasks that select more than eight specialist skills fail before agent execution. The agent loads only the matching `SKILL.md` files on demand.
 
 **Best use:** add project/domain-specific skills here (for example `database-migration`, `fastapi-api`, `terraform-module`, or `hipaa-data-handling`) rather than bloating `AGENTS.md`. Run `sdd scaffold` to install missing framework skills.
 
 ## 8. Project-owned specialist roles
 
-`/.agents/roles/` defines architect, developer, QA, security, spec, and integration reviewer responsibilities. Thin copies/adapters are materialized for supported coding-agent conventions.
+`/.agents/roles/` defines planner, architect, developer, QA, security, spec, integration, reliability, performance, E2E, and agent-system reviewer responsibilities. Thin copies/adapters are materialized for supported coding-agent conventions. The context pack names one primary role and only the specialist perspectives warranted by the routed skills.
 
 **Best use:** keep role definitions narrow. Review roles should not inherit a long developer conversation as authority; they should inspect spec, diff, tests, and evidence.
 

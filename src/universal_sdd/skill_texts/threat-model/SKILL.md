@@ -1,6 +1,9 @@
 ---
 name: threat-model
 description: Record assets, trust boundaries, and mitigations for one feature before security-sensitive implementation. Use for auth, secrets, uploads, or external model calls.
+routing:
+  phases: [implement, repair, review]
+  any: [auth, secret, threat, security, upload, external model, llm, tenant, permission]
 ---
 
 # Threat Model

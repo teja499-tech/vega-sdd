@@ -6,7 +6,7 @@ description: Independently review one implemented SDD task. Fail only when accep
 # Review Task
 
 ## When this skill loads
-The controller has already run deterministic checks. Your job is an independent read-only review. The prompt contains `TASK_REVIEW_JSON`. Load `.agents/skills/review-task/SKILL.md` and no other skill unless the pack names a contract skill you must check against.
+The controller has already run deterministic checks. Your job is an independent read-only review. The prompt contains `TASK_REVIEW_JSON`. Load `.agents/skills/review-task/SKILL.md`, the primary QA role, and only the specialist skills/roles named in the pack.
 
 ## Hard rules
 - Do not write, format, create, or delete files.

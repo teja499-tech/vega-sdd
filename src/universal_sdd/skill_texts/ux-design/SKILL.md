@@ -1,6 +1,9 @@
 ---
 name: ux-design
 description: Define page states, copy, and accessibility before UI implementation. Use when a feature has a screen, empty state, or user-facing message. Reviewers check the contract; they do not restyle the product.
+routing:
+  phases: [implement, repair, review]
+  any: [ux, ui, page, screen, accessibility, copy, form, dialog]
 ---
 
 # UX Design

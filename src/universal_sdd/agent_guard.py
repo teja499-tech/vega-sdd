@@ -75,12 +75,11 @@ def files(root,patterns):
     # write transcripts/caches elsewhere under `.cursor/` during writable runs.
     # Guarding the entire directory turns normal CLI activity into
     # "Agent modified protected controller files" run failures.
-    def protected(rel):return rel in {'AGENTS.md','CLAUDE.md','.sdd','.agents','.codex','.claude','.cursor/agents','.cursor/rules'} or rel.startswith(('.sdd/','.agents/','.codex/','.claude/','.cursor/agents/','.cursor/rules/')) or any(fnmatch.fnmatch(rel,p) for p in patterns)
+    def protected(rel):return rel in {'AGENTS.md','CLAUDE.md','.sdd-controller.lock','.sdd','.agents','.codex','.claude','.cursor/agents','.cursor/rules'} or rel.startswith(('.sdd/','.agents/','.codex/','.claude/','.cursor/agents/','.cursor/rules/')) or any(fnmatch.fnmatch(rel,p) for p in patterns)
     for folder,dirs,names in os.walk(root):
         dirs[:]=[d for d in dirs if d not in {'.git','node_modules','.venv','__pycache__','dist','build'}]
         for name in names+[d for d in dirs if (Path(folder)/d).is_symlink()]:
             path=Path(folder)/name;rel=path.relative_to(root).as_posix()
-            if rel.startswith('.sdd/runtime/'):continue
             if protected(rel):result[rel]=(b'\x00SYMLINK:'+os.readlink(path).encode()) if path.is_symlink() else path.read_bytes()
     return result
 
@@ -165,10 +164,14 @@ def restore_git_state(root: Path, original: tuple) -> None:
     head, ref, index_bytes = original
     head_text = head.decode().strip() if isinstance(head, (bytes, bytearray)) else str(head).strip()
     ref_text = ref.decode().strip() if isinstance(ref, (bytes, bytearray)) else str(ref).strip()
-    if head_text:
-        subprocess.run(["git", "update-ref", "HEAD", head_text], cwd=root, capture_output=True)
     if ref_text:
         subprocess.run(["git", "symbolic-ref", "HEAD", ref_text], cwd=root, capture_output=True)
+        if head_text:
+            subprocess.run(["git", "update-ref", ref_text, head_text], cwd=root, capture_output=True)
+        else:
+            subprocess.run(["git", "update-ref", "-d", ref_text], cwd=root, capture_output=True)
+    elif head_text:
+        subprocess.run(["git", "update-ref", "--no-deref", "HEAD", head_text], cwd=root, capture_output=True)
     path = git_index_path(root)
     if path is None:
         return
@@ -178,7 +181,9 @@ def restore_git_state(root: Path, original: tuple) -> None:
         path.unlink(missing_ok=True)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(index_bytes)
+    temporary = path.with_name(path.name + f".sdd-{os.getpid()}.tmp")
+    temporary.write_bytes(index_bytes)
+    os.replace(temporary, path)
 
 
 def restore_workspace(root: Path, snapshot: dict) -> list[str]:
@@ -228,10 +233,14 @@ def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
         after=files(root,patterns)
         changed=[p for p in before.keys()|after.keys() if before.get(p)!=after.get(p)]
         journal='.sdd/journal/events.jsonl'
-        if journal in changed and after.get(journal,b'').startswith(before.get(journal,b'')) and (root/'.sdd/runtime/pause-requested').exists():
+        pause_marker='.sdd/runtime/pause-requested'
+        if journal in changed and after.get(journal,b'').startswith(before.get(journal,b'')) and (root/pause_marker).exists():
             try:
                 new=after[journal][len(before.get(journal,b'')):].splitlines()
-                if new and all(json.loads(x).get('event')=='pause_requested' for x in new):changed.remove(journal)
+                if new and all(json.loads(x).get('event')=='pause_requested' for x in new):
+                    changed.remove(journal)
+                    if pause_marker in changed and after.get(pause_marker) == b'':
+                        changed.remove(pause_marker)
             except (ValueError,TypeError):pass
         violations=[]
         if changed:

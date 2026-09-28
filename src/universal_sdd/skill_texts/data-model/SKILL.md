@@ -1,6 +1,9 @@
 ---
 name: data-model
 description: Define entities, constraints, indexes, and migrations before persistence work. Use when a task adds tables, documents, or schema changes.
+routing:
+  phases: [implement, repair, review]
+  any: [schema, data model, migration, database, entity, table, index]
 ---
 
 # Data Model
