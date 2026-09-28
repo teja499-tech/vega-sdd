@@ -119,6 +119,16 @@ def inside(root: Path, relative: str):
 
 def policy_path(root): return Path(root) / '.sdd/workspace.yaml'
 def policy_hash(root): return hashlib.sha256(policy_path(root).read_bytes()).hexdigest()
+
+def require_approved_capabilities(root: Path, agent_name):
+    """Require approval before a real agent can load repository capabilities."""
+    name = getattr(agent_name, 'value', str(agent_name))
+    if name == 'mock':
+        return None
+    if not policy_path(root).exists():
+        raise RuntimeError('Approve a project policy before real-agent execution: sdd project setup')
+    return load_workspace(root)
+
 def capability_hash(root):
     """Bind approved execution to the agent instructions, roles, and skills it will load."""
     root=Path(root);h=hashlib.sha256()

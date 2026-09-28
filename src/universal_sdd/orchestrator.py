@@ -539,6 +539,8 @@ def retry_task(root: Path, task_id: str, *, keep_code: bool = True) -> Task:
 def ask_project(root: Path, question: str) -> str:
     paths = SDDPaths(root)
     config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
     from .artifacts import project_context
     from .compress import compress_for_prompt
@@ -606,6 +608,8 @@ def _change_analysis_json(adapter, paths: SDDPaths, prompt: str) -> dict:
 def analyze_change(root: Path, description: str) -> ChangeRequest:
     paths = SDDPaths(root)
     config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
     data = _change_analysis_json(adapter, paths, change_analysis_prompt(description, project_context(paths)))
     cr = ChangeRequest(
@@ -666,6 +670,8 @@ def apply_change(root: Path, cr: ChangeRequest) -> ChangeRequest:
     old_features = {f.id: f for f in load_features(paths)}
     old_tasks = {t.id: t for f in old_features.values() for t in f.tasks}
 
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
     result = invoke_agent(
         adapter,

@@ -5,6 +5,7 @@ import os
 import sys
 import time
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -89,11 +90,20 @@ def _persist_agent_text(paths: SDDPaths, name: str, text: str) -> None:
     (paths.runtime / f"{name}.txt").write_text(text or "", encoding="utf-8")
 
 
-def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
+def _require_model(
+    adapter,
+    prompt: str,
+    validate,
+    label: str,
+    paths: SDDPaths,
+    *,
+    invocation_root: Path | None = None,
+):
     """Run a read-only plan call and parse structured JSON, retrying once."""
     # Cursor --mode plan is for analysis/proposals and often returns prose.
     # Structured init payloads use ask (read-only) so the model can emit JSON.
-    result = invoke_agent(adapter, prompt, paths.root, writable=False, mode="ask", on_event=_event_printer)
+    agent_root = invocation_root or paths.root
+    result = invoke_agent(adapter, prompt, agent_root, writable=False, mode="ask", on_event=_event_printer)
     if not result.success:
         _persist_agent_text(paths, label.replace(" ", "-"), result.text)
         _fail(result.text or f"{label} agent failed")
@@ -102,7 +112,7 @@ def _require_model(adapter, prompt: str, validate, label: str, paths: SDDPaths):
     except Exception:
         _persist_agent_text(paths, label.replace(" ", "-"), result.text)
         console.print(f"[yellow]{label} did not return valid JSON; retrying once.[/yellow]")
-        retry = invoke_agent(adapter, _JSON_RETRY_PREFIX + prompt, paths.root, writable=False, mode="ask", on_event=_event_printer)
+        retry = invoke_agent(adapter, _JSON_RETRY_PREFIX + prompt, agent_root, writable=False, mode="ask", on_event=_event_printer)
         _persist_agent_text(paths, label.replace(" ", "-") + "-retry", retry.text)
         if not retry.success:
             _fail(retry.text or f"{label} retry failed")
@@ -239,8 +249,15 @@ def init(
         _fail(message, code)
 
     finished = False
+    init_workspace = tempfile.TemporaryDirectory(prefix="vega-sdd-init-")
+    invocation_root = Path(init_workspace.name)
     try:
-        adapter = get_adapter(agent, root)
+        # Initialization runs outside the target repository so pre-existing agent
+        # rules and project-local skills cannot execute before the user approves
+        # their capability hash during `sdd project setup`.
+        write_scaffold(invocation_root, force=True)
+        (invocation_root / "PRD.md").write_text(prd_text, encoding="utf-8")
+        adapter = get_adapter(agent, invocation_root)
         caps = adapter.capabilities()
         if not caps.installed:
             _fail_init(f"{agent.value} CLI is not installed or not on PATH. Scaffold/config were created; install the agent and rerun `sdd init`.")
@@ -254,6 +271,7 @@ def init(
             ProductModel.model_validate,
             "product discovery",
             paths,
+            invocation_root=invocation_root,
         )
 
         from .clarifications import record_architecture_decisions, record_product_questions
@@ -280,8 +298,9 @@ def init(
             _validate_decisions,
             "architecture",
             paths,
+            invocation_root=invocation_root,
         )
-        decisions = _select_architecture(adapter, augmented_prd, decisions, yes, root)
+        decisions = _select_architecture(adapter, augmented_prd, decisions, yes, invocation_root)
         write_architecture(paths, decisions)
         record_architecture_decisions(paths, decisions)
 
@@ -292,10 +311,11 @@ def init(
         console.print("\n[bold]3/4 Specification generation[/bold]")
         bundle = _require_model(
             adapter,
-            spec_bundle_prompt(augmented_prd, decisions, repo_summary, skill_root=root),
+            spec_bundle_prompt(augmented_prd, decisions, repo_summary, skill_root=invocation_root),
             SpecBundle.model_validate,
             "specification bundle",
             paths,
+            invocation_root=invocation_root,
         )
         try:
             write_spec_bundle(paths, bundle)
@@ -340,6 +360,7 @@ def init(
                 "then [bold]sdd repo branch <scope>[/bold] and [bold]sdd start --max-tasks 1[/bold]."
             )
     finally:
+        init_workspace.cleanup()
         if not finished:
             failed = load_project_state(paths)
             failed.initialized = False
@@ -555,6 +576,8 @@ def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
     root = _root(root)
     paths = SDDPaths(root)
     config = load_config(paths)
+    from .workspace import require_approved_capabilities
+    require_approved_capabilities(root, config.primary_agent)
     adapter = get_adapter(config.primary_agent, root)
     console.print("Architect intervention session. Type `exit` to leave, `change: ...` to analyze a correction/change.")
     while True:
@@ -786,6 +809,8 @@ def docs_refresh(root: Path = typer.Option(Path("."), "--root"), enrich: bool = 
         from .models import DesignDocument
         from .history import snapshot_specs
         config = load_config(paths)
+        from .workspace import require_approved_capabilities
+        require_approved_capabilities(paths.root, config.primary_agent)
         bundle = SpecBundle.model_validate(load_yaml(paths.spec_bundle_file))
         prompt = (
             "You are a technical writer working read-only. Marker: HUMAN_DESIGN_DOCUMENTS_JSON\n"
