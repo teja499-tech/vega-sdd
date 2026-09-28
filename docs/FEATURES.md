@@ -252,7 +252,7 @@ The task DAG is designed so parallel workers can be added later behind explicit 
 
 **Commands:** `sdd graph refresh`, `sdd graph query`
 
-Graphify is an external local knowledge graph. `sdd graph refresh` writes `graphify-corpus/sdd-traceability.md`, then runs `graphify extract --code-only --no-cluster` or `graphify update` when `graphify-out/graph.json` already exists. Context packs and `sdd ask` query that graph before agents grep the tree.
+Graphify is an external local knowledge graph. `sdd graph refresh` writes `graphify-corpus/sdd-traceability.md`, then runs `graphify extract --code-only --no-cluster` or `graphify update` when `graphify-out/graph.json` already exists. Vega searches that Markdown corpus itself and merges the hits with Graphify code-graph results. Graphify does not index the corpus file.
 
 `.sdd/state/` stays the execution record. If `graphify` is missing, the controller uses the task working-set file list.
 

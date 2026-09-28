@@ -12,7 +12,7 @@ Produce a feature whose tasks contain contracts, not titles. A later implement a
 - Facts: `.sdd/product/vision.md`, `requirements.md`, `clarifications.md`
 - Decisions: `.sdd/decisions/*.md` and `.sdd/architecture/decisions.md`
 - Output: `.sdd/specs/<id>-<slug>/spec.md`, `tasks.md`, and the feature object in the spec bundle
-- Traceability corpus Graphify indexes: `graphify-corpus/sdd-traceability.md` (the controller regenerates this; do not hand-edit)
+- Traceability corpus Vega searches deterministically: `graphify-corpus/sdd-traceability.md` (the controller regenerates this and merges hits with Graphify code-graph results; Graphify extract is `--code-only`; do not hand-edit)
 - Open questions that block start: `.sdd/product/clarifications.yaml`
 
 ## Feature contract

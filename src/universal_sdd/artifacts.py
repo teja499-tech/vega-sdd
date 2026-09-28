@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
 from .models import ArchitectureDecision, SpecBundle
-from .storage import SDDPaths, dump_yaml
+from .storage import SDDPaths, dump_json, dump_yaml
 
 _PROJECTION_TX = ContextVar("sdd_projection_tx", default=False)
 
@@ -17,6 +19,10 @@ _SKIP_STATE_FILES = {"project.yaml"}
 
 def _md_list(items: list[str]) -> str:
     return "\n".join(f"- {x}" for x in items) if items else "- None"
+
+
+def _tx_root(paths: SDDPaths) -> Path:
+    return paths.runtime / "projection-tx"
 
 
 def _canonical_files(paths: SDDPaths) -> dict[str, bytes]:
@@ -53,19 +59,76 @@ def _restore_canonical(paths: SDDPaths, snapshot: dict[str, bytes]) -> None:
             path.unlink()
 
 
+def _persist_tx(paths: SDDPaths, snapshot: dict[str, bytes]) -> None:
+    base = _tx_root(paths)
+    if base.exists():
+        shutil.rmtree(base)
+    files_dir = base / "files"
+    files_dir.mkdir(parents=True, exist_ok=True)
+    for rel, content in snapshot.items():
+        dest = files_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
+    dump_json(base / "active.json", {"active": True, "files": sorted(snapshot)})
+
+
+def _load_persisted_tx(paths: SDDPaths) -> dict[str, bytes] | None:
+    marker = _tx_root(paths) / "active.json"
+    if not marker.exists():
+        return None
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not data.get("active"):
+        return None
+    snapshot: dict[str, bytes] = {}
+    files_dir = _tx_root(paths) / "files"
+    for rel in data.get("files") or []:
+        if not isinstance(rel, str) or ".." in Path(rel).parts:
+            continue
+        path = files_dir / rel
+        if path.is_file():
+            snapshot[rel] = path.read_bytes()
+    return snapshot
+
+
+def _clear_tx(paths: SDDPaths) -> None:
+    base = _tx_root(paths)
+    if base.exists():
+        shutil.rmtree(base)
+
+
+def recover_projection_transaction(paths: SDDPaths) -> bool:
+    """Restore a crashed projection write if a durable transaction marker remains."""
+    if not paths.sdd.exists():
+        return False
+    snapshot = _load_persisted_tx(paths)
+    if snapshot is None:
+        return False
+    _restore_canonical(paths, snapshot)
+    _clear_tx(paths)
+    return True
+
+
 @contextmanager
 def projection_transaction(paths: SDDPaths):
-    """Stage-or-rollback journal for every canonical projection."""
+    """Durable stage-or-rollback journal for every canonical projection."""
     if _PROJECTION_TX.get():
         yield
         return
+    recover_projection_transaction(paths)
     snapshot = _canonical_files(paths)
+    _persist_tx(paths, snapshot)
     token = _PROJECTION_TX.set(True)
     try:
         yield
-    except Exception:
+    except BaseException:
         _restore_canonical(paths, snapshot)
+        _clear_tx(paths)
         raise
+    else:
+        _clear_tx(paths)
     finally:
         _PROJECTION_TX.reset(token)
 

@@ -81,6 +81,7 @@ class SDDConfig(BaseModel):
     require_resolved_clarifications: bool = True
     allow_unrestricted_agent: bool = False
     review_agent: AgentName | None = None
+    require_distinct_review_agent: bool = False
     enable_headroom: bool = True
     max_review_files: int = 15
 

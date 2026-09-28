@@ -10,21 +10,78 @@ from ..models import AgentCapabilities
 
 
 _SAFE_EXE = re.compile(r"^[A-Za-z0-9._+-]+$")
+_INTERPRETERS = {
+    "python",
+    "python3",
+    "node",
+    "nodejs",
+    "bash",
+    "sh",
+    "zsh",
+    "dash",
+    "fish",
+    "ruby",
+    "perl",
+    "pwsh",
+    "powershell",
+    "cmd",
+    "osascript",
+    "deno",
+    "lua",
+    "php",
+}
+_PACKAGE_RUNNERS = {"npm", "npx", "pnpm", "yarn", "bun", "cargo", "go"}
+
+
+def _is_interpreter(exe: str) -> bool:
+    lowered = exe.lower()
+    if lowered in _INTERPRETERS:
+        return True
+    return bool(re.fullmatch(r"python\d+(\.\d+)*", lowered))
+
+
+def copilot_shell_spec(argv: list[str] | None) -> str | None:
+    """Exact command prefix only. Never grant a bare interpreter or generic shell."""
+    if not argv:
+        return None
+    for part in argv:
+        if not part or any(ch in part for ch in ";|&`$()<>\\\"'\n\r"):
+            return None
+    exe = Path(argv[0]).name
+    if not exe or not _SAFE_EXE.fullmatch(exe):
+        return None
+    rest = argv[1:]
+    if _is_interpreter(exe):
+        if not rest or rest[0] in {"-c", "-e", "-", "--"}:
+            return None
+        prefix = [exe]
+        if rest[0] == "-m" and len(rest) >= 2:
+            if rest[1] in {"base64", "http.server", "code"}:
+                return None
+            prefix.extend(["-m", rest[1]])
+        elif rest[0].startswith("-"):
+            return None
+        else:
+            prefix.append(Path(rest[0]).name)
+        return "shell(" + " ".join(prefix) + ":*)"
+    if exe.lower() in _PACKAGE_RUNNERS:
+        if len(rest) < 1:
+            return None
+        kept = [exe, *rest[:2]] if rest[0] in {"run", "exec", "test"} else [exe, rest[0]]
+        return "shell(" + " ".join(kept) + ":*)"
+    if rest and not rest[0].startswith("-"):
+        return f"shell({exe} {rest[0]}:*)"
+    return f"shell({exe}:*)"
 
 
 def approved_copilot_tools(root: Path) -> list[str]:
-    """Read/write plus scoped check executables from the approved project policy."""
+    """Write plus scoped check prefixes from the approved project policy."""
     tools = ["write"]
     seen = {"write"}
 
     def add_shell(argv: list[str] | None) -> None:
-        if not argv:
-            return
-        exe = Path(argv[0]).name
-        if not exe or not _SAFE_EXE.fullmatch(exe):
-            return
-        token = f"shell({exe})"
-        if token in seen:
+        token = copilot_shell_spec(argv)
+        if not token or token in seen:
             return
         seen.add(token)
         tools.append(token)
@@ -68,8 +125,8 @@ class CopilotAdapter(AgentAdapter):
             version=version,
             notes=[
                 "Uses GitHub Copilot CLI `-p` prompt mode with --silent --no-ask-user.",
-                "Restricted writable runs allow write plus scoped shell(<check-exe>) from the approved policy.",
-                "Generic shell is not granted. The controller rechecks regardless.",
+                "Restricted writable runs allow write plus command-prefix shell specs from the approved policy.",
+                "Bare interpreters and generic shell are not granted. The controller rechecks regardless.",
                 "Writable runs pass --allow-all only when allow_unrestricted_agent is set.",
             ],
         )

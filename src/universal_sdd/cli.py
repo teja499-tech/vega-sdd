@@ -399,7 +399,7 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
         if cfg.review_agent:
             console.print(f"Review agent: [bold]{cfg.review_agent.value}[/bold]")
         else:
-            console.print("Review agent: same as primary (isolated second pass)")
+            console.print("Review agent: same as primary (isolated self-review, not an independent model)")
         if not cfg.enable_headroom:
             console.print("Headroom compression: disabled in config")
         if cfg.allow_unrestricted_agent:

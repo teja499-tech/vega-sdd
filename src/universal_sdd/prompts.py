@@ -220,7 +220,7 @@ def review_task_prompt(task: Task, feature: Feature, pack: ContextPack | None = 
     independence = (
         "You are the configured review agent, not the implementation agent."
         if independent
-        else "This is an isolated second pass on a fresh subprocess, not a separately configured reviewer."
+        else "This is isolated self-review on a fresh subprocess of the same adapter, not an independently configured reviewer."
     )
     return f"""
 You are an SDD reviewer. {independence} Do not assume the implementation agent was correct.

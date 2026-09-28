@@ -45,7 +45,7 @@ cd my-app
 sdd init
 ```
 
-You will choose Cursor, Codex, Claude Code, Gemini, or GitHub Copilot. The selected agent is used as the architect/specification engine during initialization and becomes the primary implementation engine until changed. Set `review_agent` in `.sdd/config.yaml` when high-risk work needs a separate reviewer.
+You will choose Cursor, Codex, Claude Code, Gemini, or GitHub Copilot. The selected agent is used as the architect/specification engine during initialization and becomes the primary implementation engine until changed. Set `review_agent` in `.sdd/config.yaml` when high-risk work needs a separate reviewer. The default is isolated self-review: a fresh subprocess of the same adapter, not an independent model. Set `require_distinct_review_agent: true` to block start unless `review_agent` is present and different from `primary_agent`.
 
 ### Product discovery
 
@@ -199,7 +199,7 @@ sdd graph refresh
 sdd graph query "task creation persistence"
 ```
 
-The first refresh runs `graphify extract <project> --code-only --no-cluster` (local AST, no model API). Later refreshes run `graphify update`. SDD also writes `graphify-corpus/sdd-traceability.md` so requirement and task identity stays next to the code graph. Canonical execution state remains `.sdd/state/`.
+The first refresh runs `graphify extract <project> --code-only --no-cluster` (local AST, no model API). Later refreshes run `graphify update`. SDD also writes `graphify-corpus/sdd-traceability.md` and searches it deterministically; those hits are merged with Graphify's code-graph results. Graphify does not index that Markdown file. Canonical execution state remains `.sdd/state/`.
 
 Headroom (`pip install headroom-ai`) compresses context packs and check logs before they enter implement, review, repair, and ask prompts. The uncompressed text stays under `.sdd/runtime/originals/`. `sdd doctor` reports both tools. Missing either one does not block a run, and a run never stops because a token estimate crossed a cap.
 
@@ -309,6 +309,7 @@ Initialization captures lightweight repo/Git context and supplies it to product/
 - `typecheck_command`
 - `allow_unrestricted_agent` (default false; opt-in for Cursor `--force`, Gemini `--yolo`, Copilot `--allow-all`)
 - `max_review_files` (default 15; a larger change set fails closed until the task is split or the owner raises the bound)
+- `require_distinct_review_agent` (default false; when true, `sdd start` requires `review_agent` to be a different adapter than `primary_agent`)
 
 The approval flags document project policy. V1's CLI enforces approval for classified spec/requirement/architecture mutation. Unrestricted agent flags stay off unless the owner sets the config field or passes `sdd start --allow-unrestricted` for that process. Isolate that run; the git guard cannot prevent secret reads or network use.
 

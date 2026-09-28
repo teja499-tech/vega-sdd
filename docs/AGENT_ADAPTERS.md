@@ -44,9 +44,9 @@ The adapter targets the `gemini` CLI one-shot `-p` prompt. Restricted writable i
 
 ## GitHub Copilot CLI
 
-The adapter targets `copilot -p` with `--silent --no-ask-user`. Restricted writable runs pass `--allow-tool write` plus scoped `--allow-tool shell(<exe>)` entries derived from the approved test/lint/typecheck and workspace check commands. Generic `shell` is not granted. `--allow-all` is added only after the unrestricted-agent opt-in; review/ask omit write approvals. The controller still re-runs deterministic checks.
+The adapter targets `copilot -p` with `--silent --no-ask-user`. Restricted writable runs pass `--allow-tool write` plus scoped `--allow-tool shell(<command>:*)` prefixes taken from the approved test/lint/typecheck and workspace check commands. Bare interpreters (`python`, `node`, `bash`) and generic `shell` are not granted. `--allow-all` is added only after the unrestricted-agent opt-in; review/ask omit write approvals. The controller still re-runs deterministic checks.
 
-Set `review_agent` in `.sdd/config.yaml` to use a different installed adapter for the isolated review pass. When unset, review is a fresh subprocess of the primary agent, not an independently configured reviewer.
+Set `review_agent` in `.sdd/config.yaml` to use a different installed adapter for independent review. When unset, review is isolated self-review: a fresh subprocess of the primary agent, not an independent model. `require_distinct_review_agent: true` blocks start until a different reviewer is configured.
 
 ## IDE copilot (optional MCP)
 

@@ -26,6 +26,13 @@ This file summarizes human-visible changes. Individual project specifications an
 - Copilot restricted runs add `--no-ask-user` and scoped `shell(<approved-check>)` tools; generic shell stays off.
 - Brownfield init sends size-capped evidence excerpts, hashes, a pre-init Graphify query, and an omitted-file note.
 - Review fails closed when the actual change set exceeds `max_review_files` instead of silently dropping files.
+- Read-only Git restore now snapshots the index file, so staged owner work is not reset to `HEAD`.
+- Task baselines are cleared only after verified task state is saved.
+- Canonical projection writes persist a rollback snapshot first and recover it after a crash or `BaseException`.
+- Copilot shell grants are command prefixes (`shell(pytest:*)`); bare interpreters are refused.
+- Feature verification maps each requirement to passing evidence IDs before the suite result can certify the feature.
+- `require_distinct_review_agent` blocks start unless review uses a different adapter; the default is isolated self-review.
+- Graphify extract stays `--code-only`. Vega searches `graphify-corpus/sdd-traceability.md` itself and keeps query output within the caller limit.
 
 
 - Removed per-task and per-run token caps. A run records raw versus compressed size in `.sdd/state/compression-ledger.yaml` and does not pause because an estimate crossed a budget.

@@ -117,12 +117,51 @@ def _append_verification(paths: SDDPaths, result: VerificationResult) -> None:
     dump_yaml(paths.verification_file, rows)
 
 
+def _feature_evidence_gaps(paths: SDDPaths, feature: Feature) -> list[str]:
+    """Deterministic verify-feature contract: every task verified, every requirement has evidence."""
+    gaps: list[str] = []
+    unverified = [task.id for task in feature.tasks if task.status != ItemStatus.verified]
+    if unverified:
+        gaps.append("unverified tasks: " + ", ".join(unverified))
+    rows = load_yaml(paths.verification_file, []) or []
+    passing = {
+        row.get("id")
+        for row in rows
+        if isinstance(row, dict) and row.get("id") and row.get("status") in {"pass", "warning"}
+    }
+    req_ids = list(feature.requirements) or sorted({rid for task in feature.tasks for rid in task.implements})
+    for req_id in req_ids:
+        owners = [task for task in feature.tasks if req_id in task.implements]
+        if not owners:
+            gaps.append(f"{req_id}: no task implements this requirement")
+            continue
+        evidence = [eid for task in owners for eid in task.evidence if eid in passing]
+        if not evidence:
+            gaps.append(f"{req_id}: no passing evidence ids")
+    return gaps
+
+
 def _verify_feature(root, paths, config, feature, task, workspace, journal, state, features) -> bool:
-    """Controller-owned feature verification. verify-feature is not an agent skill invocation."""
+    """Controller-owned feature verification. Implements the verify-feature contract in-process."""
     from .skill_library import lifecycle_skill
     from .workspace import run_checks
 
     skill = lifecycle_skill("verify")
+    gaps = _feature_evidence_gaps(paths, feature)
+    if gaps:
+        task.status = ItemStatus.failed
+        feature.status = ItemStatus.in_progress
+        _save_features(paths, features)
+        state.run_status = RunStatus.blocked
+        save_project_state(paths, state)
+        journal.append(
+            "feature_evidence_missing",
+            feature=feature.id,
+            skill=skill,
+            executor="controller",
+            gaps=gaps,
+        )
+        return False
     if config.test_command:
         suite = _run_check(owner_command_argv(config.test_command), root, task.id, "test")
         _append_verification(paths, suite)
@@ -158,6 +197,13 @@ def _verify_feature(root, paths, config, feature, task, workspace, journal, stat
             save_project_state(paths, state)
             journal.append("feature_suite_failed", feature=feature.id, evidence=release)
             return False
+    journal.append(
+        "feature_verified",
+        feature=feature.id,
+        skill=skill,
+        executor="controller",
+        requirements=list(feature.requirements),
+    )
     return True
 
 
@@ -176,6 +222,12 @@ def run_development(
     if not state.initialized:
         raise RuntimeError("Initialization is incomplete. Run `sdd init` to finish product, architecture, and spec generation.")
     assert_start_ready(paths, accept_deferred=accept_deferred)
+    if config.require_distinct_review_agent:
+        if not config.review_agent or config.review_agent == config.primary_agent:
+            raise RuntimeError(
+                "require_distinct_review_agent is set. Configure review_agent to a different installed adapter "
+                "than primary_agent. The default isolated subprocess is self-review, not independent review."
+            )
     adapter = get_adapter(config.primary_agent, root)
     reviewer = get_adapter(config.review_agent or config.primary_agent, root)
     caps = adapter.capabilities()
@@ -399,8 +451,8 @@ def run_development(
                     root, paths, config, feature, task, workspace, journal, state, features
                 ):
                     break
-            clear_task_baseline(paths, task.id)
             _save_features(paths, features)
+            clear_task_baseline(paths, task.id)
             refresh_graph(paths)
             journal.append("task_verified", task=task.id, evidence=review_result.id)
             from .recovery import checkpoint

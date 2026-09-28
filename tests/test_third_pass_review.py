@@ -283,8 +283,9 @@ def test_copilot_scopes_approved_check_shell(initialized):
     assert "--allow-all" not in cmd
     tools = [cmd[i + 1] for i, part in enumerate(cmd) if part == "--allow-tool"]
     assert "write" in tools
-    assert "shell(pytest)" in tools
+    assert "shell(pytest:*)" in tools
     assert "shell" not in tools
+    assert not any(tool == "shell(python)" or tool.startswith("shell(python:") for tool in tools)
 
 
 def test_review_fails_closed_when_change_set_exceeds_limit(initialized):

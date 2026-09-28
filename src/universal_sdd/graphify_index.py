@@ -1,4 +1,4 @@
-"""Graphify is the knowledge graph. SDD only feeds it a traceability corpus."""
+"""Graphify owns the code graph. Vega searches the traceability corpus separately and merges hits."""
 from __future__ import annotations
 
 import re
@@ -26,7 +26,7 @@ def graph_json(root: Path) -> Path:
 
 
 def write_trace_corpus(paths: SDDPaths) -> Path:
-    """Markdown Graphify can index. This is not a second orchestrator."""
+    """Markdown Vega searches deterministically. Graphify extract is code-only."""
     requirements = load_yaml(paths.requirements_file, []) or []
     features = load_yaml(paths.features_file, []) or []
     decisions = load_yaml(paths.architecture_decisions_file, []) or []
@@ -151,26 +151,39 @@ def search_trace_corpus(root: Path, question: str, *, limit: int = 2500) -> str:
 
 
 def query_knowledge_graph(root: Path, question: str, *, limit: int = 4000, timeout: int = 90) -> str:
+    limit = max(1, int(limit))
     code_text = ""
     if graphify_installed() and graph_json(root).exists():
         code, output = run_graphify(root, ["query", question], timeout=timeout)
         if code == 0 and output.strip():
             code_text = output.strip()
-    corpus_budget = min(2500, max(1200, (limit * 3) // 5))
-    code_budget = max(400, limit - corpus_budget - 48)
-    corpus = search_trace_corpus(root, question, limit=corpus_budget)
+    header_corpus = "# Traceability corpus\n"
+    header_code = "# Code graph\n"
+    joiner = "\n\n"
+    corpus_budget = limit
+    if code_text:
+        corpus_budget = max(1, min(limit, (limit * 3) // 5))
+        corpus_budget = min(corpus_budget, max(1, limit - len(header_code) - len(joiner)))
+    corpus = search_trace_corpus(root, question, limit=max(1, corpus_budget - len(header_corpus)))
     if not corpus and not corpus_path(root).exists():
         try:
             write_trace_corpus(SDDPaths(root))
         except Exception:
             pass
-        corpus = search_trace_corpus(root, question, limit=corpus_budget)
+        corpus = search_trace_corpus(root, question, limit=max(1, corpus_budget - len(header_corpus)))
     parts: list[str] = []
+    remaining = limit
     if corpus:
-        parts.append("# Traceability corpus\n" + corpus[:corpus_budget])
-    if code_text:
-        parts.append("# Code graph\n" + code_text[:code_budget])
-    return "\n\n".join(parts)
+        chunk = header_corpus + corpus
+        parts.append(chunk[:remaining])
+        remaining = max(0, remaining - len(parts[-1]) - len(joiner))
+    if code_text and remaining > len(header_code):
+        chunk = header_code + code_text
+        parts.append(chunk[:remaining])
+    result = joiner.join(parts)
+    if len(result) > limit:
+        result = result[:limit]
+    return result
 
 
 def graph_context(paths: SDDPaths, question: str = "architecture and requirements") -> str:

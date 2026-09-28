@@ -18,7 +18,7 @@ Satisfy the task verification and the acceptance criteria it implements. Leave a
 | `.sdd/specs/<feature>/tasks.md` | Task boundary and verification | No |
 | `.sdd/state/` | Canonical status, requirements, features | No |
 | `.sdd/decisions/` | Approved ADRs | No |
-| `graphify-corpus/sdd-traceability.md` | Corpus Graphify indexes | No |
+| `graphify-corpus/sdd-traceability.md` | SDD traceability corpus. Vega searches it deterministically and merges hits with Graphify code-graph results. Graphify extract is `--code-only` and does not index this file. | No |
 | `graphify-out/graph.json` | Knowledge graph | No; refresh with `sdd graph refresh` after code changes |
 | `.agents/skills/` | These runbooks | No |
 | `AGENTS.md` | Repository rules | No |

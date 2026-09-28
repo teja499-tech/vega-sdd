@@ -137,16 +137,48 @@ def changed_since_hashes(root: Path, hashes: dict[str, str]) -> list[str]:
     return sorted(name for name in set(hashes) | set(after) if hashes.get(name) != after.get(name))
 
 
+def git_index_path(root: Path) -> Path | None:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--git-path", "index"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode:
+        return None
+    raw = (completed.stdout or "").strip()
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else (root / path).resolve()
+
+
+def snapshot_git_index(root: Path) -> bytes | None:
+    path = git_index_path(root)
+    if path is None or not path.is_file():
+        return None
+    return path.read_bytes()
+
+
 def restore_git_state(root: Path, original: tuple) -> None:
-    """Restore HEAD/index without rewriting working-tree files."""
-    head, ref, _cached = original
+    """Restore HEAD and the captured index file. Does not rewrite the working tree."""
+    head, ref, index_bytes = original
     head_text = head.decode().strip() if isinstance(head, (bytes, bytearray)) else str(head).strip()
     ref_text = ref.decode().strip() if isinstance(ref, (bytes, bytearray)) else str(ref).strip()
     if head_text:
         subprocess.run(["git", "update-ref", "HEAD", head_text], cwd=root, capture_output=True)
     if ref_text:
         subprocess.run(["git", "symbolic-ref", "HEAD", ref_text], cwd=root, capture_output=True)
-    subprocess.run(["git", "read-tree", "HEAD"], cwd=root, capture_output=True)
+    path = git_index_path(root)
+    if path is None:
+        return
+    lock = path.with_name(path.name + ".lock")
+    lock.unlink(missing_ok=True)
+    if index_bytes is None:
+        path.unlink(missing_ok=True)
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(index_bytes)
 
 
 def restore_workspace(root: Path, snapshot: dict) -> list[str]:
@@ -184,7 +216,10 @@ def restore_workspace(root: Path, snapshot: dict) -> list[str]:
 def guarded_run(adapter,prompt,root:Path,patterns=(),**kwargs):
     before=files(root,patterns)
     if any(v.startswith(b'\x00SYMLINK:') for v in before.values()):raise RuntimeError('Protected controller symlink')
-    def git_state():return tuple(subprocess.run(['git',*args],cwd=root,capture_output=True).stdout for args in [('rev-parse','HEAD'),('symbolic-ref','-q','HEAD'),('diff','--cached','--raw')])
+    def git_state():
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True).stdout
+        ref = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=root, capture_output=True).stdout
+        return (head, ref, snapshot_git_index(root))
     original=git_state();source=None
     if not kwargs.get('writable',False):
         source=workspace_snapshot(root)
