@@ -24,6 +24,16 @@ Choose the guide that matches what you are trying to do.
 | Pause/resume, crashes, checkpoints, and integrity recovery | [Recovery](RECOVERY.md) |
 | Maintainer release steps | [Releasing Vega](RELEASING.md) |
 
+## Project policies
+
+| Document | Purpose |
+| --- | --- |
+| [Contributing](../CONTRIBUTING.md) | Development setup and pull-request expectations |
+| [Support](../SUPPORT.md) | Where to ask questions and report defects |
+| [Security](../SECURITY.md) | Private vulnerability reporting and supported releases |
+| [Code of conduct](../CODE_OF_CONDUCT.md) | Community behavior and enforcement |
+| [Acknowledgements](../ACKNOWLEDGEMENTS.md) | Credits, inspirations, integrations, and license boundaries |
+
 ## Evidence and historical context
 
 | Document | Purpose |
