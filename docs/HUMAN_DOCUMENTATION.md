@@ -1,6 +1,6 @@
 # Human documentation and repository support
 
-Vega SDD 0.4.0 generates an indexed Markdown documentation pack and human-readable engineering history. The pack is based on the canonical specification bundle and approved ADRs. It is not a certification that a repository is enterprise-ready.
+Vega SDD 0.4.1 generates an indexed Markdown documentation pack and human-readable engineering history. The pack is based on the canonical specification bundle and approved ADRs. It is not a certification that a repository is enterprise-ready.
 
 ## Documents generated
 

@@ -1,6 +1,6 @@
 # Recovery and Context Hygiene
 
-This guide covers Vega SDD 0.4.0 recovery. See [use-case journeys](USE_CASES.md#5-resume-or-recover-work) for copy/paste recipes and [architecture](ARCHITECTURE.md) for integrity boundaries.
+This guide covers Vega SDD 0.4.1 recovery. See [use-case journeys](USE_CASES.md#5-resume-or-recover-work) for copy/paste recipes and [architecture](ARCHITECTURE.md) for integrity boundaries.
 
 ## Context is disposable; repository state is not
 

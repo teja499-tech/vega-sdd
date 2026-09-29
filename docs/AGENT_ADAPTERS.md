@@ -1,6 +1,6 @@
 # Agent Adapters
 
-Vega SDD 0.4.0 supports Cursor, Codex, Claude Code, Gemini CLI, GitHub Copilot CLI, and a deterministic mock adapter. Prompts include selected role/skill metadata only; runbooks remain in `.agents/` and are bound to workspace approval. `python -m universal_sdd.mcp_server` exposes preview/read-only project tools.
+Vega SDD 0.4.1 supports Cursor, Codex, Claude Code, Gemini CLI, GitHub Copilot CLI, and a deterministic mock adapter. Prompts include selected role/skill metadata only; runbooks remain in `.agents/` and are bound to workspace approval. `python -m universal_sdd.mcp_server` exposes preview/read-only project tools.
 
 Adapters isolate vendor-specific command syntax from SDD lifecycle semantics.
 
@@ -56,7 +56,7 @@ Set `review_agent` in `.sdd/config.yaml` to use a different installed adapter fo
 
 ## IDE copilot (optional MCP)
 
-`python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change` over stdio JSON-RPC. `sdd_change` is preview-only; an IDE model cannot approve or apply a specification mutation. A human runs `sdd change --approve` after reviewing the invalidated-task list. Scaffolded Cursor commands live in `.cursor/commands/sdd-ask.md` and `sdd-change.md`.
+`python -m universal_sdd.mcp_server` exposes `sdd_ask`, `sdd_status`, and `sdd_change` over stdio JSON-RPC. `sdd_change` is preview-only; an IDE model cannot approve or apply a specification mutation. After reviewing the invalidated-task list, a human applies that exact stored proposal with `sdd change --approve-id CR-...`. Scaffolded Cursor commands live in `.cursor/commands/sdd-ask.md` and `sdd-change.md`.
 
 ## Mock
 

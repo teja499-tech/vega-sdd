@@ -24,11 +24,22 @@ Choose the guide that matches what you are trying to do.
 | Pause/resume, crashes, checkpoints, and integrity recovery | [Recovery](RECOVERY.md) |
 | Maintainer release steps | [Releasing Vega](RELEASING.md) |
 
+## Project policies
+
+| Document | Purpose |
+| --- | --- |
+| [Contributing](../CONTRIBUTING.md) | Development setup and pull-request expectations |
+| [Support](../SUPPORT.md) | Where to ask questions and report defects |
+| [Security](../SECURITY.md) | Private vulnerability reporting and supported releases |
+| [Code of conduct](../CODE_OF_CONDUCT.md) | Community behavior and enforcement |
+| [Acknowledgements](../ACKNOWLEDGEMENTS.md) | Credits, inspirations, integrations, and license boundaries |
+
 ## Evidence and historical context
 
 | Document | Purpose |
 | --- | --- |
-| [0.4.0 verification](VERIFICATION_0.4.0.md) | Current tests, benchmarks, packaging, and qualification boundary |
+| [0.4.1 verification](VERIFICATION_0.4.1.md) | Current tests, benchmarks, packaging, and qualification boundary |
+| [0.4.0 verification](VERIFICATION_0.4.0.md) | Historical public-readiness baseline |
 | [Research and gaps](RESEARCH_AND_GAPS.md) | Cross-project rationale and project-specific work |
 | [0.2.0 verification](VERIFICATION_0.2.0.md) | Historical lifecycle baseline |
 | [0.1.2 verification](VERIFICATION_0.1.2.md) | Historical documentation/history baseline |
