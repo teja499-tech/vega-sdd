@@ -60,13 +60,17 @@ def _call(name: str, arguments: dict[str, Any]) -> str:
         preview = {
             "id": cr.id,
             "classification": cr.classification,
+            "affected_requirements": cr.affected_requirements,
             "affected_tasks": cr.affected_tasks,
             "affected_features": cr.affected_features,
+            "affected_decisions": cr.affected_decisions,
+            "affected_design_documents": cr.affected_design_documents,
+            "affected_global_fields": cr.affected_global_fields,
             "requires_approval": cr.requires_approval,
             "proposed_changes": cr.proposed_changes,
             "status": cr.status,
             "applied": False,
-            "next_step": "Review the preview, then run `sdd change --approve` from a human-controlled terminal if you accept the mutation.",
+            "next_step": f"Review the preview, then run `sdd change --approve-id {cr.id}` from a human-controlled terminal if you accept this exact mutation.",
         }
         return json.dumps(preview, indent=2)
     raise ValueError(f"Unknown tool: {name}")

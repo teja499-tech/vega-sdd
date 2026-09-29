@@ -41,7 +41,7 @@ TEMPLATES = {
 
 CURSOR_COMMANDS = {
     "sdd-ask.md": "# SDD Ask\n\nAnswer a project question using approved specs, ADRs, and `graphify query` when `graphify-out/graph.json` exists.\nRun `sdd ask \"<question>\"` in the project root. Do not mutate files.\n",
-    "sdd-change.md": "# SDD Change\n\nTurn an ad-hoc request into a classified change with an invalidation preview.\nRun `sdd change \"<request>\"` and approve only after reviewing affected tasks.\n",
+    "sdd-change.md": "# SDD Change\n\nTurn an ad-hoc request into a classified change with an invalidation preview.\nFirst run `sdd change \"<request>\"`. Review the affected IDs and proposed changes, then copy the emitted exact command: `sdd change --approve-id CR-...`. Never re-run the request text to approve it.\n",
 }
 
 CURSOR_RULE = "---\ndescription: Vega SDD repository contract\nalwaysApply: true\n---\nFollow `AGENTS.md`. Treat `.sdd/state/` as canonical execution state and `.sdd/specs/` as approved feature intent. Load only task-relevant skills from `.agents/skills/`.\nAsk project questions with `sdd ask`. Propose plan changes with `sdd change`.\n"

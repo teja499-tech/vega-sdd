@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shlex
+import shutil
 import subprocess
 import uuid
 import tempfile
@@ -576,6 +577,9 @@ _CHANGE_JSON_KEYS = {
     "affected_requirements",
     "affected_features",
     "affected_tasks",
+    "affected_decisions",
+    "affected_design_documents",
+    "affected_global_fields",
     "proposed_changes",
     "requires_approval",
 }
@@ -698,41 +702,67 @@ def apply_change(root: Path, cr: ChangeRequest, *, on_event: Callable[[AgentEven
         journal.append("nested_cursor_warning", change_id=cr.id)
         if os.environ.get("SDD_BLOCK_NESTED_CURSOR", "").strip().lower() in {"1", "true", "yes"}:
             raise RuntimeError(
-                "Nested Cursor agent detected. Run `sdd change --approve` from a host terminal "
+                f"Nested Cursor agent detected. Run `sdd change --approve-id {cr.id}` from a host terminal "
                 "(not inside an active Cursor agent session) so reconcile does not hang."
             )
     stage_dir = stage_reconcile_inputs(paths, cr.id, bundle_data, decision_data)
-    relative_stage = str(stage_dir.relative_to(paths.root))
-    prompt = reconcile_change_prompt(
-        cr.description,
-        cr.classification,
-        stage_dir=relative_stage,
-        affected_requirements=cr.affected_requirements,
-        affected_features=cr.affected_features,
-        affected_tasks=cr.affected_tasks,
-        proposed_changes=cr.proposed_changes,
-    )
-    adapter = get_adapter(config.primary_agent, root)
-    adapter.timeout_seconds = min(getattr(adapter, "timeout_seconds", RECONCILE_TIMEOUT_SECONDS) or RECONCILE_TIMEOUT_SECONDS, RECONCILE_TIMEOUT_SECONDS)
-    state = load_project_state(paths)
-    result = invoke_agent(
-        adapter,
-        prompt,
-        root,
-        writable=False,
-        mode="plan",
-        on_event=on_event,
-    )
-    record_usage(paths, state, task_id=None, phase="change-reconcile", prompt=prompt, result=result)
+    try:
+        relative_stage = str(stage_dir.relative_to(paths.root))
+        prompt = reconcile_change_prompt(
+            cr.description,
+            cr.classification,
+            stage_dir=relative_stage,
+            affected_requirements=cr.affected_requirements,
+            affected_features=cr.affected_features,
+            affected_tasks=cr.affected_tasks,
+            affected_decisions=cr.affected_decisions,
+            affected_design_documents=cr.affected_design_documents,
+            affected_global_fields=cr.affected_global_fields,
+            proposed_changes=cr.proposed_changes,
+        )
+        adapter = get_adapter(config.primary_agent, root)
+        adapter.timeout_seconds = min(getattr(adapter, "timeout_seconds", RECONCILE_TIMEOUT_SECONDS) or RECONCILE_TIMEOUT_SECONDS, RECONCILE_TIMEOUT_SECONDS)
+        state = load_project_state(paths)
+        staged_context = (stage_dir / "bundle.yaml").read_text(encoding="utf-8") + (stage_dir / "decisions.yaml").read_text(encoding="utf-8")
+        result = invoke_agent(
+            adapter,
+            prompt,
+            root,
+            writable=False,
+            mode="plan",
+            on_event=on_event,
+        )
+        record_usage(
+            paths,
+            state,
+            task_id=None,
+            phase="change-reconcile",
+            prompt=prompt,
+            result=result,
+            additional_context=staged_context,
+            estimate_basis="prompt+staged-input",
+        )
+    finally:
+        shutil.rmtree(stage_dir, ignore_errors=True)
     if not result.success:
         raise RuntimeError(result.text)
     data = extract_json(result.text)
     from .spec_quality import assert_reconcile_slice_quality
     old_bundle = SpecBundle.model_validate(bundle_data)
     base_decisions = [ArchitectureDecision.model_validate(x) for x in decision_data]
-    bundle, decisions = merge_reconcile_slices(old_bundle, base_decisions, data)
+    bundle, decisions = merge_reconcile_slices(old_bundle, base_decisions, data, cr)
     assert_reconcile_slice_quality(old_bundle, bundle, data)
-    invalidated = set(data.get("invalidate_tasks", [])) | set(cr.affected_tasks)
+    if (
+        old_bundle.model_dump(mode="json") == bundle.model_dump(mode="json")
+        and [item.model_dump(mode="json") for item in base_decisions]
+        == [item.model_dump(mode="json") for item in decisions]
+    ):
+        raise RuntimeError("Change rejected before mutation: reconcile returned no canonical specification changes")
+    invalidated = {
+        task_id
+        for task_id in set(data.get("invalidate_tasks", [])) | set(cr.affected_tasks)
+        if task_id in old_tasks
+    }
     old_reqs = {r.id: r.model_dump(exclude={"status"}) for r in old_bundle.requirements}
     changed_reqs = set(cr.affected_requirements) | {r.id for r in bundle.requirements
         if old_reqs.get(r.id) != r.model_dump(exclude={"status"})}
@@ -740,8 +770,8 @@ def apply_change(root: Path, cr: ChangeRequest, *, on_event: Callable[[AgentEven
         for task in feature.tasks:
             old = old_tasks.get(task.id)
             runtime = {"status", "attempts", "evidence", "working_set", "last_findings", "check_paths", "check_command"}
-            if feature.id in cr.affected_features or changed_reqs.intersection(task.implements) or (
-                old and old.model_dump(exclude=runtime) != task.model_dump(exclude=runtime)):
+            if old and (feature.id in cr.affected_features or changed_reqs.intersection(task.implements) or (
+                old.model_dump(exclude=runtime) != task.model_dump(exclude=runtime))):
                 invalidated.add(task.id)
     # Conservative transitive invalidation across task and feature dependencies.
     while True:
@@ -749,7 +779,10 @@ def apply_change(root: Path, cr: ChangeRequest, *, on_event: Callable[[AgentEven
         affected_features = {f.id for f in bundle.features if any(t.id in invalidated for t in f.tasks)}
         for feature in bundle.features:
             for task in feature.tasks:
-                if invalidated.intersection(task.depends_on) or affected_features.intersection(feature.depends_on):
+                if task.id in old_tasks and (
+                    invalidated.intersection(task.depends_on)
+                    or affected_features.intersection(feature.depends_on)
+                ):
                     invalidated.add(task.id)
         if previous == invalidated:
             break

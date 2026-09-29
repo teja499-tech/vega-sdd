@@ -145,6 +145,36 @@ def assert_reconcile_slice_quality(
 
     if slice_data.get("product_update") and _too_short(after.product.summary, MIN_SUMMARY):
         errors.append("Product summary is too thin to implement against")
+    if slice_data.get("product_update"):
+        for key in ("users", "capabilities", "workflows", "constraints", "assumptions"):
+            if getattr(before.product, key) and not getattr(after.product, key):
+                errors.append(f"product.{key} cannot remove all existing entries")
+
+    if "architecture_summary" in slice_data and _too_short(after.architecture_summary, MIN_SUMMARY):
+        errors.append("architecture_summary is too thin for an architecture contract")
+    for key in ("test_strategy", "security_principles", "release_criteria"):
+        if key in slice_data:
+            values = getattr(after, key)
+            if not values:
+                errors.append(f"{key} cannot remove all existing entries")
+            elif any(len(str(value).strip()) < 10 for value in values):
+                errors.append(f"{key} entries must be descriptive")
+    for key in (slice_data.get("design_document_updates") or {}):
+        old = before.design_documents.get(key)
+        new = after.design_documents.get(key)
+        if old and new and (old.summary.strip() or old.sections) and not (new.summary.strip() or new.sections):
+            errors.append(f"{key}: design document update removed all existing content")
+
+    if not after.requirements:
+        errors.append("reconcile cannot remove every requirement")
+    if not after.features:
+        errors.append("reconcile cannot remove every feature")
+    removed_tasks = set(slice_data.get("remove_task_ids") or [])
+    for old_feature in before.features:
+        if removed_tasks.intersection(task.id for task in old_feature.tasks):
+            new_feature = after_features.get(old_feature.id)
+            if new_feature is not None and not new_feature.tasks:
+                errors.append(f"{old_feature.id}: reconcile cannot remove every task from a retained feature")
 
     if errors:
         raise ValueError("Reconcile slice is too thin:\n- " + "\n- ".join(errors))

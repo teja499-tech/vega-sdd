@@ -257,6 +257,14 @@ class VerificationResult(BaseModel):
 
 
 class ChangeRequest(BaseModel):
+    @field_validator("id")
+    @classmethod
+    def safe_id(cls, value):
+        import re
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+            raise ValueError("Unsafe change request identifier")
+        return value
+
     id: str
     description: str
     classification: Literal[
@@ -265,6 +273,17 @@ class ChangeRequest(BaseModel):
     affected_requirements: list[str] = Field(default_factory=list)
     affected_features: list[str] = Field(default_factory=list)
     affected_tasks: list[str] = Field(default_factory=list)
+    affected_decisions: list[str] = Field(default_factory=list)
+    affected_design_documents: list[str] = Field(default_factory=list)
+    affected_global_fields: list[
+        Literal[
+            "product",
+            "architecture_summary",
+            "test_strategy",
+            "security_principles",
+            "release_criteria",
+        ]
+    ] = Field(default_factory=list)
     proposed_changes: list[str] = Field(default_factory=list)
     requires_approval: bool = True
     approved: bool = False
