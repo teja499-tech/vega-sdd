@@ -1,10 +1,16 @@
+![Vega SDD — Spec-Driven Software Development](https://raw.githubusercontent.com/teja499-tech/vega-sdd/main/docs/assets/vega-sdd-hero.webp)
+
 # Vega SDD
+
+[![Framework checks](https://github.com/teja499-tech/vega-sdd/actions/workflows/framework-checks.yml/badge.svg?branch=main)](https://github.com/teja499-tech/vega-sdd/actions/workflows/framework-checks.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB.svg)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-0B7285.svg)](https://github.com/teja499-tech/vega-sdd/blob/main/LICENSE)
 
 **Turn a PRD into a repository-owned, reviewable software delivery workflow.**
 
 Vega SDD is an open-source control plane for building software with Cursor, Codex, Claude Code, Gemini CLI, or GitHub Copilot CLI. Product intent, architecture decisions, tasks, checks, review evidence, changes, and recovery state stay in the repository, so work can continue across terminals, sessions, and coding agents.
 
-> **Status: 0.4.0 alpha.** The framework has 205 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, hosted branch protection, deployment hooks, and application-specific safety remain your responsibility. See [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md).
+> **Status: 0.4.1 alpha.** The framework has 228 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, deployment hooks, and application-specific safety remain your responsibility. The public repository protects `main` with pull-request review, required CI, linear history, force-push/deletion blocking, and resolved-conversation enforcement. See [0.4.1 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.1.md).
 
 ## Choose your starting point
 
@@ -184,7 +190,7 @@ Graphify improves local structural retrieval. Headroom compresses context packs 
 | [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, adapters, state, capability routing, and safety boundaries |
 | [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, mock, and MCP behavior |
 | [Recovery](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RECOVERY.md) | Crash recovery, checkpoints, and context hygiene |
-| [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md) | Reproducible test and benchmark evidence |
+| [0.4.1 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.1.md) | Reproducible test and benchmark evidence |
 
 ## Safety boundaries
 
@@ -200,4 +206,12 @@ python -m pytest tests
 python -m build
 ```
 
-See [CONTRIBUTING.md](https://github.com/teja499-tech/vega-sdd/blob/main/CONTRIBUTING.md), [SECURITY.md](https://github.com/teja499-tech/vega-sdd/blob/main/SECURITY.md), and [CHANGELOG.md](https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md). Report issues with the Vega version, OS, Python version, project kind, adapter, reproduction steps, and redacted logs.
+See [CONTRIBUTING.md](https://github.com/teja499-tech/vega-sdd/blob/main/CONTRIBUTING.md), [SECURITY.md](https://github.com/teja499-tech/vega-sdd/blob/main/SECURITY.md), [SUPPORT.md](https://github.com/teja499-tech/vega-sdd/blob/main/SUPPORT.md), and [CHANGELOG.md](https://github.com/teja499-tech/vega-sdd/blob/main/CHANGELOG.md). Report issues with the Vega version, OS, Python version, project kind, adapter, reproduction steps, and redacted logs.
+
+## Acknowledgements
+
+Vega SDD is an independent open-source project. Its composable skill/runbook design was informed by the public work of [ECC](https://github.com/affaan-m/ECC), and its optional local retrieval and compression paths integrate with [Graphify](https://github.com/Graphify-Labs/graphify) and [Headroom](https://github.com/headroomlabs-ai/headroom). See [ACKNOWLEDGEMENTS.md](https://github.com/teja499-tech/vega-sdd/blob/main/ACKNOWLEDGEMENTS.md) for full credits and the non-endorsement boundary.
+
+## License
+
+Copyright 2026 Teja Nalluri and Vega SDD contributors. Licensed under the [Apache License 2.0](https://github.com/teja499-tech/vega-sdd/blob/main/LICENSE). Third-party projects retain their own copyrights and licenses; see [ACKNOWLEDGEMENTS.md](https://github.com/teja499-tech/vega-sdd/blob/main/ACKNOWLEDGEMENTS.md).

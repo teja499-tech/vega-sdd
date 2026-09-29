@@ -4,12 +4,17 @@ This file summarizes human-visible changes. Individual project specifications an
 
 ## [0.4.1] - 2026-09-28
 
-- Fix brownfield `sdd change --approve` reconcile hang/token burn: stage bundle/ADRs on disk, return slice updates the controller merges, stream progress, 300s reconcile timeout, and ledger ask/change tokens.
+- Fix brownfield change reconcile hang/token burn: stage bundle/ADRs on disk, return slice updates the controller merges, stream progress, enforce a 300s reconcile timeout, and record ask/change tokens.
+- Bind requirement and architecture approval to the exact reviewed, stored proposal with `sdd change --approve-id CR-...`; the unsafe unbound `--approve` form is rejected.
 - Warn when Graphify/Headroom are missing (token efficiency) and when nested Cursor would spawn reconcile.
-- Brownfield reconcile validates slice quality only and writes with `enforce_quality=False` so historical thin features are not re-blocked.
+- Preserve historical brownfield specs without allowing regressions: validate changed slices and global policy fields, enforce approved ID scope, reject controller-owned runtime fields and no-op responses, support explicit scoped deletion, and revalidate traceability before mutation.
+- Remove temporary staged reconcile inputs after every call, ignore crash leftovers, and include staged bundle/ADR content in fallback token estimates.
+- Preserve unexpected user-authored files while pruning stale generated projections, and keep newly introduced tasks pending rather than marking them invalidated.
 
 ## [0.4.0] - 2026-09-27
 
+- Add named project ownership and release-ready community metadata: NOTICE attribution, citation data, support and conduct policies, CODEOWNERS, dependency updates, security guidance, and release-workflow hardening.
+- Add official light-theme project artwork and a public acknowledgements page covering ECC design inspiration, optional Graphify/Headroom integrations, open-source foundations, and contributors.
 - Reorganize documentation around executable user journeys: add ChatGPT/Claude-assisted PRD discovery, greenfield/brownfield/defect/change/recovery/monorepo/delivery recipes, an exact CLI command reference, current sample output, a documentation index, and 0.4.0 verification evidence.
 - Add a discoverable capability registry: tasks can name up to eight safe project/domain skills, routing metadata selects risk-specific runbooks, and context packs include developer/QA plus specialist role contracts through progressive disclosure.
 - Add reliability, performance, E2E, migration-safety, and agent-system runbooks inspired by ECC's strongest composable-skill patterns; keep lifecycle authority and permissions in the controller.
