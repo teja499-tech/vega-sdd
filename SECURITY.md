@@ -4,10 +4,15 @@ Vega SDD runs configured commands and coding-agent CLIs in a project workspace. 
 
 ## Reporting a vulnerability
 
-Please use **Report a vulnerability** in this repository's GitHub **Security** tab if private vulnerability reporting is enabled. Do not publish exploit details or credentials in a public issue. If private reporting is not available, open a public issue requesting a private reporting channel without disclosing the vulnerability.
+Use **Report a vulnerability** in this repository's GitHub **Security** tab. Do not publish exploit details, credentials, or customer data in a public issue. If the private-report button is unavailable, open a public issue that asks the maintainer to establish a private channel, without including any vulnerability details.
 
-Include the affected version, reproduction steps, impact, and any suggested mitigation. Maintainers will acknowledge the report and coordinate a fix and disclosure; response times are not guaranteed for this alpha release.
+Include the affected version, reproduction steps, impact, and any suggested mitigation. Remove secrets and personal data from evidence. The maintainer will acknowledge the report, investigate it, coordinate a fix, and agree on disclosure timing. Response-time guarantees are not yet offered for this alpha project.
 
 ## Supported releases
 
-Only the latest published release receives fixes. This policy will be revised as the project matures.
+| Version | Supported |
+| --- | --- |
+| Latest published release | Yes |
+| Older releases | No |
+
+Security fixes are documented in the changelog and release notes. This policy will be revised as the project matures.

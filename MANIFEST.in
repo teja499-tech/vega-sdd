@@ -1,5 +1,5 @@
-include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md AGENTS.md NOTICE
-recursive-include docs *.md *.json
+include README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md ACKNOWLEDGEMENTS.md CITATION.cff AGENTS.md NOTICE
+recursive-include docs *.md *.json *.webp
 recursive-include examples *.py *.md *.json
 recursive-include tests *.py
 recursive-include src/universal_sdd/skill_texts *.md
