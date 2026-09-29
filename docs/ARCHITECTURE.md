@@ -1,6 +1,6 @@
 # Vega SDD Architecture
 
-This document describes the 0.4.0 controller. Graphify is optional retrieval and Headroom is optional prompt compression; neither replaces canonical `.sdd/` state or imposes a token-stop policy. See [project lifecycle](PROJECT_LIFECYCLE.md) for delivery and [0.4.0 verification](VERIFICATION_0.4.0.md) for tested boundaries.
+This document describes the 0.4.1 controller. Graphify is optional retrieval and Headroom is optional prompt compression; neither replaces canonical `.sdd/` state or imposes a token-stop policy. See [project lifecycle](PROJECT_LIFECYCLE.md) for delivery and [0.4.1 verification](VERIFICATION_0.4.1.md) for tested boundaries.
 
 ## System shape
 

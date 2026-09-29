@@ -8,8 +8,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
 
-from .models import ArchitectureDecision, SpecBundle
-from .storage import SDDPaths, dump_json, dump_yaml
+from .models import ArchitectureDecision, Feature, SpecBundle
+from .storage import SDDPaths, dump_json, dump_yaml, load_yaml
 
 _PROJECTION_TX = ContextVar("sdd_projection_tx", default=False)
 
@@ -154,13 +154,50 @@ def projection_transaction(paths: SDDPaths):
         _PROJECTION_TX.reset(token)
 
 
+def _decision_projection_path(paths: SDDPaths, decision: ArchitectureDecision) -> Path:
+    return paths.decisions / f"{decision.id.lower()}-{decision.category.replace('_','-')}.md"
+
+
+def _feature_projection_path(paths: SDDPaths, feature: Feature) -> Path:
+    slug = re.sub(r"[^a-z0-9_-]+", "-", feature.name.lower())
+    return paths.specs / f"{feature.id}-{slug}"
+
+
+def _remove_generated_projection(path: Path, parent: Path) -> None:
+    """Remove known generated content without deleting unexpected user-authored files."""
+    if path.parent.resolve() != parent.resolve():
+        raise ValueError(f"Unsafe generated projection path: {path}")
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        for name in ("spec.md", "tasks.md", "state.yaml"):
+            generated = path / name
+            if generated.is_symlink() or generated.is_file():
+                generated.unlink()
+        try:
+            path.rmdir()
+        except OSError:
+            # Preserve the directory when it contains anything the projection
+            # renderer does not explicitly own.
+            pass
+
+
 def _render_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -> None:
+    prior = [
+        ArchitectureDecision.model_validate(item)
+        for item in (load_yaml(paths.architecture_decisions_file, []) or [])
+    ]
+    expected = {_decision_projection_path(paths, item) for item in decisions}
+    for item in prior:
+        old_path = _decision_projection_path(paths, item)
+        if old_path not in expected:
+            _remove_generated_projection(old_path, paths.decisions)
     dump_yaml(paths.architecture_decisions_file, decisions)
     index_lines = ["# Architecture Decisions", ""]
     for decision in decisions:
         selected = decision.selected or decision.recommendation or "Deferred"
         index_lines.append(f"- **{decision.id} — {decision.category}:** {selected}")
-        adr = paths.decisions / f"{decision.id.lower()}-{decision.category.replace('_','-')}.md"
+        adr = _decision_projection_path(paths, decision)
         option_text = []
         for option in decision.options:
             option_text.append(
@@ -186,9 +223,23 @@ def write_architecture(paths: SDDPaths, decisions: list[ArchitectureDecision]) -
         _render_architecture(paths, decisions)
 
 
-def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+def _render_spec_bundle(
+    paths: SDDPaths,
+    bundle: SpecBundle,
+    *,
+    preserve_verification: bool = False,
+    enforce_quality: bool = True,
+) -> None:
     from .spec_quality import assert_spec_quality
-    assert_spec_quality(bundle)
+    if enforce_quality:
+        assert_spec_quality(bundle)
+    previous_data = load_yaml(paths.spec_bundle_file, {}) or {}
+    prior_features = [Feature.model_validate(item) for item in previous_data.get("features", [])]
+    expected_feature_dirs = {_feature_projection_path(paths, item) for item in bundle.features}
+    for item in prior_features:
+        old_path = _feature_projection_path(paths, item)
+        if old_path not in expected_feature_dirs:
+            _remove_generated_projection(old_path, paths.specs)
     product = bundle.product
     (paths.product / "vision.md").write_text(
         f"# {product.name}\n\n{product.summary}\n\n## Users\n{_md_list(product.users)}\n\n## Capabilities\n{_md_list(product.capabilities)}\n",
@@ -227,7 +278,7 @@ def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verific
 
     roadmap = ["# Roadmap", ""]
     for feature in bundle.features:
-        feature_dir = paths.specs / f"{feature.id}-{re.sub(r'[^a-z0-9_-]+', '-', feature.name.lower())}"
+        feature_dir = _feature_projection_path(paths, feature)
         feature_dir.mkdir(parents=True, exist_ok=True)
         roadmap.append(f"- [ ] {feature.id} — {feature.name} (depends on: {', '.join(feature.depends_on) or 'none'})")
         task_lines = ["# Tasks", ""]
@@ -273,9 +324,20 @@ def _render_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verific
     render_history(paths)
 
 
-def write_spec_bundle(paths: SDDPaths, bundle: SpecBundle, *, preserve_verification: bool = False) -> None:
+def write_spec_bundle(
+    paths: SDDPaths,
+    bundle: SpecBundle,
+    *,
+    preserve_verification: bool = False,
+    enforce_quality: bool = True,
+) -> None:
     with projection_transaction(paths):
-        _render_spec_bundle(paths, bundle, preserve_verification=preserve_verification)
+        _render_spec_bundle(
+            paths,
+            bundle,
+            preserve_verification=preserve_verification,
+            enforce_quality=enforce_quality,
+        )
 
 
 def project_context(paths: SDDPaths, max_chars: int = 30000) -> str:

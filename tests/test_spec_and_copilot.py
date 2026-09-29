@@ -37,7 +37,8 @@ def test_title_only_feature_is_rejected():
     assert any("title-only" in e or "thin" in e for e in errors)
 
 
-def test_context_pack_and_graph(initialized):
+def test_context_pack_and_graph(initialized, monkeypatch):
+    monkeypatch.setattr("universal_sdd.graphify_index.graphify_installed", lambda: False)
     features = load_features(initialized)
     pack = build_context_pack(initialized, features[0].tasks[0], features[0])
     text = pack.render()
@@ -130,7 +131,7 @@ def test_graphify_query_uses_cli_when_present(initialized, monkeypatch):
 
     monkeypatch.setattr("universal_sdd.graphify_index.graphify_installed", lambda: True)
     monkeypatch.setattr("universal_sdd.graphify_index.graph_json", lambda root: initialized.root / "graphify-out" / "graph.json")
-    (initialized.root / "graphify-out").mkdir()
+    (initialized.root / "graphify-out").mkdir(exist_ok=True)
     (initialized.root / "graphify-out" / "graph.json").write_text("{}", encoding="utf-8")
     monkeypatch.setattr("universal_sdd.graphify_index.run_graphify", fake_run)
     assert "notes.py" in query_knowledge_graph(initialized.root, "notes")

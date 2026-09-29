@@ -39,9 +39,11 @@ for command in ['verify','roadmap','requirements','architecture','doctor','log']
 cli('feature',['feature','F002'])
 cli('intervene',['intervene'],input='Why SQLite?\nexit\n')
 before=(ROOT/'.sdd/state/features.yaml').read_bytes()
-cli('decline-change',['change','Set title limit to 80'],input='n\n')
+cli('preview-change',['change','Set title limit to 80'])
 assert (ROOT/'.sdd/state/features.yaml').read_bytes()==before
-cli('approve-change',['change','Set title limit to 80','--approve'])
+change_files=sorted((ROOT/'.sdd/changes').glob('CR-*.yaml'),key=lambda p:p.stat().st_mtime_ns)
+preview_id=yaml.safe_load(change_files[-1].read_text())['id']
+cli('approve-change',['change','--approve-id',preview_id])
 fs=yaml.safe_load((ROOT/'.sdd/state/features.yaml').read_text())
 assert fs[0]['tasks'][0]['status']=='verified'
 assert fs[1]['tasks'][0]['status']=='invalidated'

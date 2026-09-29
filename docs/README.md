@@ -38,7 +38,8 @@ Choose the guide that matches what you are trying to do.
 
 | Document | Purpose |
 | --- | --- |
-| [0.4.0 verification](VERIFICATION_0.4.0.md) | Current tests, benchmarks, packaging, and qualification boundary |
+| [0.4.1 verification](VERIFICATION_0.4.1.md) | Current tests, benchmarks, packaging, and qualification boundary |
+| [0.4.0 verification](VERIFICATION_0.4.0.md) | Historical public-readiness baseline |
 | [Research and gaps](RESEARCH_AND_GAPS.md) | Cross-project rationale and project-specific work |
 | [0.2.0 verification](VERIFICATION_0.2.0.md) | Historical lifecycle baseline |
 | [0.1.2 verification](VERIFICATION_0.1.2.md) | Historical documentation/history baseline |

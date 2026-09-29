@@ -236,7 +236,6 @@ def test_graphify_keeps_corpus_when_code_graph_is_huge(initialized, monkeypatch)
 def test_apply_change_rolls_back_when_render_fails(initialized):
     original = initialized.spec_bundle_file.read_text(encoding="utf-8")
     decisions = initialized.architecture_decisions_file.read_text(encoding="utf-8")
-    bundle = load_yaml(initialized.spec_bundle_file)
 
     class Reconciler:
         def capabilities(self):
@@ -246,7 +245,20 @@ def test_apply_change_rolls_back_when_render_fails(initialized):
             return True
 
         def run(self, prompt, **kwargs):
-            return AgentResult(success=True, text=json.dumps({"bundle": bundle, "invalidate_tasks": []}))
+            return AgentResult(
+                success=True,
+                text=json.dumps(
+                    {
+                        "requirement_updates": [
+                            {
+                                "id": "REQ-001",
+                                "statement": "The system shall support the clarified core workflow.",
+                            }
+                        ],
+                        "invalidate_tasks": [],
+                    }
+                ),
+            )
 
     from universal_sdd.models import ChangeRequest
     with patch("universal_sdd.orchestrator.get_adapter", return_value=Reconciler()):

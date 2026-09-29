@@ -396,13 +396,15 @@ sdd change "Every profile needs an independent language preference"
 After reviewing the printed impact, approve explicitly:
 
 ```bash
-sdd change "Every profile needs an independent language preference" --approve
+sdd change --approve-id CR-2A81FC
 sdd verify
 sdd status
 sdd resume
 ```
 
 Stable unaffected task IDs retain state. Affected work is invalidated conservatively and loses stale verification evidence.
+
+Approved spec reconciliation is slice-based: the agent reads a temporary staged copy, returns only affected updates, and never owns task status or evidence. The controller rejects out-of-scope updates, empty/no-op results, policy regressions, and invalid traceability before writing canonical state. Temporary reconcile inputs are removed after the call. Run the emitted `sdd change --approve-id CR-...` command from a host terminal when Cursor is already controlling your current shell. Because approval loads the reviewed file from `.sdd/changes/`, it cannot receive a newly analyzed, broader scope.
 
 ## 14. Retry failed work
 

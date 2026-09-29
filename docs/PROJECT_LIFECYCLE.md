@@ -1,6 +1,6 @@
 # Project lifecycle
 
-Vega SDD 0.4.0 stores specifications, human-readable designs, task history, evidence, and change/commit links in `.sdd/`. Approved execution contracts let the same controller supervise an application, library, command-line tool, data pipeline, ML or infrastructure repository, mobile/desktop system, documentation project, or mixed monorepo without pretending they share one build/deploy mechanism. Hosting, toolchain, runtime, and application safety remain project-specific.
+Vega SDD 0.4.1 stores specifications, human-readable designs, task history, evidence, and change/commit links in `.sdd/`. Approved execution contracts let the same controller supervise an application, library, command-line tool, data pipeline, ML or infrastructure repository, mobile/desktop system, documentation project, or mixed monorepo without pretending they share one build/deploy mechanism. Hosting, toolchain, runtime, and application safety remain project-specific.
 
 ## Greenfield and brownfield onboarding
 
@@ -44,7 +44,7 @@ Configure branch protection, required reviewer/code-owner policies, stale-approv
 sdd pipeline export --provider github
 sdd pipeline export --provider gitlab
 sdd pipeline export --provider azure
-sdd pipeline export --provider github --wheel /path/vega_sdd-0.4.0-py3-none-any.whl
+sdd pipeline export --provider github --wheel /path/vega_sdd-0.4.1-py3-none-any.whl
 ```
 
 The exporter writes a frozen-policy standalone Python checker and a GitHub checks workflow, GitLab include fragment or Azure steps template. Existing workflows are preserved. `--update-generated` may replace only files still byte-for-byte equal to the last generated copy. GitHub checks target pull requests, base pushes and merge groups with read-only repository permission. Commit the policy, `.sdd/ci/` and relevant workflow; configure toolchains and dependencies through `setup` commands. The optional GitHub delivery workflow checks and builds once on the integration branch, moves the same artifact to downstream environment jobs, and carries promotion receipts between jobs. Configure actual protected host environments, allowed dispatch users and cloud credentials; exported YAML does not provision them. Default runner is Linux. Check action commit pins/host support before enabling, especially the download-artifact pin, which could not be confirmed through the official commit endpoint in this environment.

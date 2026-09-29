@@ -97,14 +97,22 @@ elif 'ARCHITECTURE_DECISIONS_JSON' in prompt:
     output=[dict(id='ARCH-001',category='database',question='Database for the single-host pilot?',options=[dict(name='SQLite',summary='Local transactional store',fit='high'),dict(name='PostgreSQL',summary='Managed multi-host option',fit='medium')],recommendation='SQLite',recommendation_reason='Explicit single-host scope')]
 elif 'SPEC_BUNDLE_JSON' in prompt:output=bundle()
 elif 'RECONCILE_CHANGE_JSON' in prompt:
-    output={'bundle':bundle(),'invalidate_tasks':[],'notes':['Title maximum 80; existing data unchanged']}
-    output['bundle']['requirements'][1]['statement']='New incident title must be 1..80 characters; retain existing titles.'
-    output['bundle']['requirements'][1]['acceptance_criteria']=['AC-002: reject an 81-character title; accept an 80-character title']
+    output={
+        'requirement_updates': [{
+            'id': 'REQ-002',
+            'statement': 'New incident title must be 1..80 characters; retain existing titles.',
+            'acceptance_criteria': ['AC-002: reject an 81-character title; accept an 80-character title'],
+        }],
+        'design_document_updates': {},
+        'invalidate_tasks': ['TASK-F002-001'],
+        'notes': ['Title maximum 80; existing data unchanged'],
+    }
     for key,section in [('LLD','Key execution flows'),('API_DESIGN','Requests and responses')]:
-        output['bundle']['design_documents'][key]['sections'][section]=output['bundle']['design_documents'][key]['sections'][section].replace('120','80')
+        current=design_documents()[key]
+        output['design_document_updates'][key]={'sections': {section: current['sections'][section].replace('120','80')}}
     (root/'fixture-change-approved').write_text('80')
 elif 'CHANGE_ANALYSIS_JSON' in prompt:
-    output=dict(classification='requirement_change',affected_requirements=['REQ-002'],affected_features=['F002'],affected_tasks=['TASK-F002-001'],proposed_changes=['Change title maximum to 80'],requires_approval=True)
+    output=dict(classification='requirement_change',affected_requirements=['REQ-002'],affected_features=['F002'],affected_tasks=['TASK-F002-001'],affected_design_documents=['LLD','API_DESIGN'],proposed_changes=['Change title maximum to 80'],requires_approval=True)
 elif 'TASK_IMPLEMENTATION' in prompt or 'Findings:' in prompt:
     # Match the controller's current task card, not other TASK-* ids that appear in the corpus pack.
     if 'Task: TASK-F001-001' in prompt:

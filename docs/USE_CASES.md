@@ -133,7 +133,7 @@ sdd change "Each family profile must have an independent language preference"
 Vega prints the classification, affected requirements/features/tasks, and proposed changes. After reviewing it:
 
 ```bash
-sdd change "Each family profile must have an independent language preference" --approve
+sdd change --approve-id CR-2A81FC
 sdd requirements
 sdd architecture
 sdd roadmap
@@ -142,7 +142,17 @@ sdd status
 sdd resume
 ```
 
-Approval is never delegated through MCP or an IDE shortcut. A human uses the CLI confirmation or `--approve` after reviewing invalidation.
+Approval is never delegated through MCP or an IDE shortcut. A human copies the emitted ID into `--approve-id` after reviewing invalidation. The second command loads the stored proposal and does not re-run analysis, so approval cannot silently broaden its scope.
+
+The approved reconcile reads staged specs, returns only the affected slices, and removes its temporary input afterward. Vega rejects updates outside the previewed requirement/feature/task scope, agent-supplied execution status, empty policy rewrites, and responses that make no canonical change. If you launched the command from inside Cursor, repeat it in a host terminal; use `SDD_BLOCK_NESTED_CURSOR=1` when you prefer a hard failure for nested sessions.
+
+Expected completion:
+
+```text
+Reconciling approved change (slice merge, 300s timeout)…
+CR-2A81FC applied.
+Review `sdd status`, then `sdd resume` when ready.
+```
 
 ## 5. Resume or recover work
 
@@ -454,7 +464,7 @@ This aggregates local project checks. It is not an atomic multi-repository deplo
 | Need an answer, no mutation | `sdd ask` |
 | Need a conversational diagnosis | `sdd intervene` |
 | Found incorrect implementation | `sdd change "..."` |
-| Want different approved behavior | `sdd change "..." --approve` after preview |
+| Want different approved behavior | Preview with `sdd change "..."`, then use the emitted `sdd change --approve-id CR-...` command |
 | Run should stop safely | `sdd pause` |
 | Task failed but code is useful | `sdd task retry ID --keep-code` |
 | Old chat is gone | `sdd resume` |

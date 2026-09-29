@@ -312,6 +312,9 @@ Marker: CHANGE_ANALYSIS_JSON
   "affected_requirements":["REQ-..."],
   "affected_features":["F..."],
   "affected_tasks":["TASK-..."],
+  "affected_decisions":["ARCH-..."],
+  "affected_design_documents":["API_DESIGN"],
+  "affected_global_fields":["product|architecture_summary|test_strategy|security_principles|release_criteria"],
   "proposed_changes":["..."],
   "requires_approval": true
 }}
@@ -319,6 +322,7 @@ Marker: CHANGE_ANALYSIS_JSON
 Rules:
 - If the spec is already correct and code violates it, classify implementation_defect and requires_approval=false.
 - Requirement/spec/architecture mutations require explicit user approval.
+- Declare every existing or planned new ID and every global/design-document field that reconciliation may change. Omit unaffected scopes.
 - Never rewrite a valid spec to match incorrect code.
 
 <UserConcern>{description}</UserConcern>
@@ -337,8 +341,27 @@ Answer using the approved PRD, ADRs, specs, and current implementation state. Di
 """.strip()
 
 
-def reconcile_change_prompt(description: str, classification: str, bundle_json: str, decisions_json: str) -> str:
+def reconcile_change_prompt(
+    description: str,
+    classification: str,
+    *,
+    stage_dir: str,
+    affected_requirements: list[str] | None = None,
+    affected_features: list[str] | None = None,
+    affected_tasks: list[str] | None = None,
+    affected_decisions: list[str] | None = None,
+    affected_design_documents: list[str] | None = None,
+    affected_global_fields: list[str] | None = None,
+    proposed_changes: list[str] | None = None,
+) -> str:
     skill = lifecycle_skill("reconcile")
+    reqs = ", ".join(affected_requirements or []) or "-"
+    feats = ", ".join(affected_features or []) or "-"
+    tasks = ", ".join(affected_tasks or []) or "-"
+    decisions = ", ".join(affected_decisions or []) or "-"
+    documents = ", ".join(affected_design_documents or []) or "-"
+    globals_ = ", ".join(affected_global_fields or []) or "-"
+    proposed = "; ".join(proposed_changes or []) or "-"
     return f"""
 You are the SDD reconciliation architect. An explicitly approved change must be applied to canonical structured specs.
 Load `{skill}` from `.agents/skills/{skill}/SKILL.md`.
@@ -346,26 +369,41 @@ Skill catalog:
 {skill_catalog(skill)}
 Return ONLY JSON. No markdown fences. Marker: RECONCILE_CHANGE_JSON
 
-Return:
+Return slice updates only (the controller merges them). Do NOT return a full SpecBundle.
 {{
-  "bundle": <complete SpecBundle object using the same schema supplied>,
-  "architecture_decisions": <complete architecture decision list>,
+  "requirement_updates": [{{"id":"REQ-...","statement":"..."}}],
+  "remove_requirement_ids": ["REQ-..."],
+  "architecture_decision_updates": [{{"id":"ARCH-...","selected":"..."}}],
+  "remove_architecture_decision_ids": ["ARCH-..."],
+  "feature_updates": [{{"id":"F...","summary":"...","tasks":[{{"id":"TASK-...","description":"..."}}]}}],
+  "remove_feature_ids": ["F..."],
+  "remove_task_ids": ["TASK-..."],
+  "design_document_updates": {{"OPERATIONS": {{"summary":"..."}}}},
+  "product_update": {{"summary":"..."}},
+  "architecture_summary": "optional replacement summary string",
   "invalidate_tasks": ["TASK-..."],
   "notes": ["what changed and why"]
 }}
 
 Rules:
-- Preserve all stable requirement, feature, task and architecture IDs unless an item is truly removed or replaced.
-- Add new IDs only for genuinely new items.
-- Preserve unaffected content verbatim where practical.
-- Update all traceability links and dependency edges.
-- Update affected design_documents, preserving the same document contract and distinguishing current implementation from approved target design. Record unresolved details as gaps.
+- Read current specs from disk at `{stage_dir}/bundle.yaml` and `{stage_dir}/decisions.yaml`. Do not invent unrelated rewrites.
+- Return ONLY mutated slices for the affected ids below. Omit unchanged items.
+- Preserve stable requirement, feature, task, and architecture IDs. Add new IDs only for genuinely new items.
+- Use the explicit remove_* lists for approved deletions; omission never deletes an item.
+- Never return controller-owned execution fields such as status, attempts, evidence, working_set, last_findings, check_paths, or check_command.
+- Update affected design_documents; record unresolved details as gaps.
 - List every previously completed task whose evidence is no longer valid in invalidate_tasks.
 - Do not mark new or changed work verified.
+- Do not embed the full bundle or full ADR list in your reply.
 
 Approved change classification: {classification}
 Approved change: {description}
-
-<CURRENT_SPEC_BUNDLE>{bundle_json}</CURRENT_SPEC_BUNDLE>
-<CURRENT_ARCHITECTURE_DECISIONS>{decisions_json}</CURRENT_ARCHITECTURE_DECISIONS>
+Proposed: {proposed}
+Affected requirements: {reqs}
+Affected features: {feats}
+Affected tasks: {tasks}
+Affected architecture decisions: {decisions}
+Affected design documents: {documents}
+Affected global fields: {globals_}
+Stage directory: {stage_dir}
 """.strip()

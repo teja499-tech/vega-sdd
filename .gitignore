@@ -9,6 +9,7 @@ build/
 *.egg-info/
 .sdd/runtime/process.json
 .sdd/runtime/*.lock
+.sdd/runtime/reconcile/
 audit/
 audit-v*/
 *.log

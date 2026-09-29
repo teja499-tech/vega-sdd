@@ -2,6 +2,15 @@
 
 This file summarizes human-visible changes. Individual project specifications and commit links are recorded in the managed project's own change history.
 
+## [0.4.1] - 2026-09-28
+
+- Fix brownfield change reconcile hang/token burn: stage bundle/ADRs on disk, return slice updates the controller merges, stream progress, enforce a 300s reconcile timeout, and record ask/change tokens.
+- Bind requirement and architecture approval to the exact reviewed, stored proposal with `sdd change --approve-id CR-...`; the unsafe unbound `--approve` form is rejected.
+- Warn when Graphify/Headroom are missing (token efficiency) and when nested Cursor would spawn reconcile.
+- Preserve historical brownfield specs without allowing regressions: validate changed slices and global policy fields, enforce approved ID scope, reject controller-owned runtime fields and no-op responses, support explicit scoped deletion, and revalidate traceability before mutation.
+- Remove temporary staged reconcile inputs after every call, ignore crash leftovers, and include staged bundle/ADR content in fallback token estimates.
+- Preserve unexpected user-authored files while pruning stale generated projections, and keep newly introduced tasks pending rather than marking them invalidated.
+
 ## [0.4.0] - 2026-09-27
 
 - Add named project ownership and release-ready community metadata: NOTICE attribution, citation data, support and conduct policies, CODEOWNERS, dependency updates, security guidance, and release-workflow hardening.

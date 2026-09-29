@@ -1,6 +1,6 @@
 # Vega SDD feature reference
 
-This reference describes the capabilities available in Vega SDD 0.4.0. For an executable walkthrough, use the [user guide](USER_GUIDE.md) or [use-case journeys](USE_CASES.md).
+This reference describes the capabilities available in Vega SDD 0.4.1. For an executable walkthrough, use the [user guide](USER_GUIDE.md) or [use-case journeys](USE_CASES.md).
 
 ## Product discovery and specification
 
@@ -163,11 +163,13 @@ Headroom optionally compresses context excerpts and check logs. Originals stay u
 
 ### Explicit intent approval
 
-Requirement/architecture mutations show affected IDs and require CLI confirmation or `--approve`. MCP change requests are preview-only.
+Requirement/architecture mutations show affected IDs and require `--approve-id CR-...` for the exact stored proposal. MCP change requests are preview-only.
 
 ### Conservative invalidation
 
 Approved reconciliation preserves stable unaffected state, invalidates affected tasks/dependents, clears stale evidence, refreshes projections, and revalidates traceability.
+
+Reconciliation uses bounded slice updates instead of returning the full spec bundle. The controller enforces the approved requirement/feature/task scope, rejects agent-authored runtime status and evidence, supports explicit scoped deletion, validates changed slices and global policies, rejects no-op application, includes staged input in fallback token estimates, and cleans up staged files after the call. A 300-second adapter timeout bounds the reconcile invocation.
 
 ### Clarifications and retry
 
@@ -249,4 +251,4 @@ The guard detects/restores repository mutations; it is not an OS sandbox. Provid
 
 ## Tested examples
 
-The 0.4.0 suite covers 205 tests, Python 3.11/3.12 CI, wheel/sdist builds, an incident-service lifecycle benchmark, and Python library, CLI, SQLite pipeline, and Node web cross-project benchmarks. See [verification evidence](VERIFICATION_0.4.0.md).
+The 0.4.1 suite covers 228 tests, Python 3.11/3.12 CI, wheel/sdist builds, an incident-service lifecycle benchmark, and Python library, CLI, SQLite pipeline, and Node web cross-project benchmarks. See [verification evidence](VERIFICATION_0.4.1.md).

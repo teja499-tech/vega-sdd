@@ -15,8 +15,8 @@ def estimate_tokens(text: str | None) -> int:
     return max(1, (len(text) + 3) // 4)
 
 
-def usage_from_result(prompt: str, result: AgentResult) -> tuple[int, int]:
-    prompt_tokens = result.prompt_tokens or estimate_tokens(prompt)
+def usage_from_result(prompt: str, result: AgentResult, additional_context: str = "") -> tuple[int, int]:
+    prompt_tokens = result.prompt_tokens or estimate_tokens(prompt + additional_context)
     completion_tokens = result.completion_tokens or estimate_tokens(result.text)
     return prompt_tokens, completion_tokens
 
@@ -37,8 +37,12 @@ def record_usage(
     phase: str,
     prompt: str,
     result: AgentResult,
+    additional_context: str = "",
+    estimate_basis: str = "prompt",
 ) -> dict[str, Any]:
-    prompt_tokens, completion_tokens = usage_from_result(prompt, result)
+    provider_prompt = bool(result.prompt_tokens)
+    provider_completion = bool(result.completion_tokens)
+    prompt_tokens, completion_tokens = usage_from_result(prompt, result, additional_context)
     total = prompt_tokens + completion_tokens
     result.prompt_tokens = prompt_tokens
     result.completion_tokens = completion_tokens
@@ -54,6 +58,8 @@ def record_usage(
         "total": total,
         "run_total": state.tokens_this_run,
         "project_total": state.tokens_used,
+        "usage_source": "provider" if provider_prompt and provider_completion else "mixed" if provider_prompt or provider_completion else "estimate",
+        "estimate_basis": "provider-reported" if provider_prompt and provider_completion else estimate_basis,
     }
     ledger = load_yaml(token_ledger_path(paths), []) or []
     ledger.append(row)

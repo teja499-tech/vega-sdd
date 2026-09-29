@@ -1,6 +1,6 @@
 # Vega SDD command reference
 
-Run `sdd --help` or `sdd <group> <command> --help` for the installed version's authoritative syntax. This reference covers Vega SDD 0.4.0.
+Run `sdd --help` or `sdd <group> <command> --help` for the installed version's authoritative syntax. This reference covers Vega SDD 0.4.1.
 
 Most commands accept `--root PATH`; when omitted, the current directory is the project root.
 
@@ -71,11 +71,30 @@ These commands render repository-owned state. They do not call an implementation
 | `sdd clarify` | Records an answer | `sdd clarify Q1 --answer "Owners only"` |
 | `sdd change` | Preview by default; may mutate after approval | `sdd change "Add per-profile locale"` |
 
-Explicit change approval:
+Preview, note the emitted change-request ID, and approve that exact proposal:
 
 ```bash
-sdd change "Add per-profile locale" --approve
+sdd change "Add per-profile locale"
+sdd change --approve-id CR-2A81FC
 ```
+
+For requirement, specification, or architecture changes, Vega stages the current bundle for a read-only reconciliation agent, accepts only affected slice updates, validates traceability and quality, then removes the temporary staged copy. Existing controller-owned status and evidence cannot be supplied by the agent. Approved removals use explicit deletion lists rather than treating omitted objects as deleted. A no-op response is rejected instead of marking the change applied.
+
+Typical output:
+
+```text
+CR-2A81FC
+Classification: requirement_change
+Affected requirements: REQ-014
+Affected features: F004
+Tasks that will be invalidated: TASK-F004-002
+Approval required: yes
+Reconciling approved change (slice merge, 300s timeout)…
+CR-2A81FC applied.
+Review `sdd status`, then `sdd resume` when ready.
+```
+
+If Cursor is already driving the terminal, run the approval command from a normal host terminal to avoid a nested Cursor session. Set `SDD_BLOCK_NESTED_CURSOR=1` to reject that situation instead of warning.
 
 ## Agent selection
 
@@ -163,7 +182,7 @@ sdd pipeline export --provider github
 sdd pipeline export --provider gitlab
 sdd pipeline export --provider azure
 sdd pipeline export --provider github --update-generated
-sdd pipeline export --provider github --wheel /path/to/vega_sdd-0.4.0-py3-none-any.whl
+sdd pipeline export --provider github --wheel /path/to/vega_sdd-0.4.1-py3-none-any.whl
 ```
 
 Export is non-overwriting. `--update-generated` replaces only a file that still matches its last generated copy.

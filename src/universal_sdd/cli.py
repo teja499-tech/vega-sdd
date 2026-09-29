@@ -427,9 +427,16 @@ def doctor(root: Path = typer.Option(Path("."), "--root")) -> None:
         try:
             import headroom  # noqa: F401
             headroom_state = "installed"
+            headroom_ok = True
         except ImportError:
             headroom_state = "missing — prompts stay uncompressed until headroom-ai is installed"
+            headroom_ok = False
         console.print(f"Headroom: {headroom_state}")
+        if not shutil.which("graphify") or not headroom_ok:
+            console.print(
+                "[yellow]Token efficiency degraded: install Graphify and headroom-ai so "
+                "ask/change/task packs stay scoped and compressed.[/yellow]"
+            )
         if cfg.review_agent:
             console.print(f"Review agent: [bold]{cfg.review_agent.value}[/bold]")
         else:
@@ -605,7 +612,9 @@ def intervene(root: Path = typer.Option(Path("."), "--root")) -> None:
             cr = analyze_change(root, desc)
             _print_change(cr)
             if cr.requires_approval:
-                console.print("Run `sdd change \"...\"` to explicitly approve/apply it.")
+                console.print(
+                    f"After review, apply this exact proposal with: sdd change --approve-id {cr.id}"
+                )
             continue
         try:
             answer = _intervention_answer(root, question)
@@ -621,6 +630,9 @@ def _print_change(cr: ChangeRequest) -> None:
         f"Affected requirements: {', '.join(cr.affected_requirements) or '-'}\n"
         f"Affected features: {', '.join(cr.affected_features) or '-'}\n"
         f"Tasks that will be invalidated: {', '.join(cr.affected_tasks) or '-'}\n"
+        f"Affected architecture decisions: {', '.join(cr.affected_decisions) or '-'}\n"
+        f"Affected design documents: {', '.join(cr.affected_design_documents) or '-'}\n"
+        f"Affected global fields: {', '.join(cr.affected_global_fields) or '-'}\n"
         f"Approval required: {'yes' if cr.requires_approval else 'no'}\n"
         f"Proposed: {'; '.join(cr.proposed_changes) or '-'}",
         title=cr.id,
@@ -631,27 +643,74 @@ def _print_change(cr: ChangeRequest) -> None:
 
 @app.command()
 def change(
-    description: str = typer.Argument(..., help="Problem or desired change in natural language."),
+    description: Optional[str] = typer.Argument(None, help="Problem or desired change in natural language."),
     root: Path = typer.Option(Path("."), "--root"),
-    approve: bool = typer.Option(False, "--approve", help="Explicitly approve specification/architecture mutation."),
+    approve_id: Optional[str] = typer.Option(
+        None,
+        "--approve-id",
+        help="Apply the exact stored change request previously reviewed by this ID.",
+    ),
+    approve: bool = typer.Option(
+        False,
+        "--approve",
+        help="Deprecated unsafe approval flag; use --approve-id with a reviewed change request.",
+    ),
 ) -> None:
     """Analyze a problem, classify it, and safely repair or reconcile affected specs."""
     root = _root(root)
-    try:
-        cr = analyze_change(root, description)
-    except (RuntimeError, ValueError) as exc:
-        _fail(str(exc), 2)
+    if approve:
+        _fail(
+            "`--approve` cannot bind approval to a reviewed proposal. Preview the change, "
+            "then run `sdd change --approve-id CR-...` with its exact ID.",
+            2,
+        )
+    if approve_id:
+        if description:
+            _fail("Pass either a change description or `--approve-id`, not both.", 2)
+        try:
+            safe_id = ChangeRequest(id=approve_id, description="approval lookup").id
+        except ValueError as exc:
+            _fail(str(exc), 2)
+        stored_path = SDDPaths(root).changes / f"{safe_id}.yaml"
+        stored = load_yaml(stored_path, {}) or {}
+        if not stored:
+            _fail(f"Unknown change request: {safe_id}", 2)
+        try:
+            cr = ChangeRequest.model_validate(stored)
+        except ValueError as exc:
+            _fail(f"Stored change request {safe_id} is invalid: {exc}", 2)
+        if cr.status == "rejected":
+            _fail(f"Change request {safe_id} was rejected and cannot be approved.", 2)
+        if cr.status == "applied":
+            console.print(f"[green]{cr.id} is already applied.[/green]")
+            return
+        cr.approved = True
+        cr.status = "approved"
+    else:
+        if not description:
+            _fail("Provide a change description, or use `--approve-id CR-...`.", 2)
+        try:
+            cr = analyze_change(root, description)
+        except (RuntimeError, ValueError) as exc:
+            _fail(str(exc), 2)
     _print_change(cr)
-    if cr.requires_approval and not approve:
-        approve = typer.confirm("This changes approved requirements/specs/architecture. Approve?", default=False)
-    if cr.requires_approval and not approve:
+    if cr.requires_approval and not approve_id:
         console.print(f"Change recorded as proposed: .sdd/changes/{cr.id}.yaml")
-        console.print("Re-run with --approve after reviewing the invalidated-task preview.")
+        console.print(f"After review, apply this exact proposal with: sdd change --approve-id {cr.id}")
         return
-    cr.approved = True
-    cr.status = "approved"
+    if not cr.requires_approval:
+        cr.approved = True
+        cr.status = "approved"
+    from .reconcile import nested_cursor_agent
+    if nested_cursor_agent() and cr.classification != "implementation_defect":
+        console.print(
+            "[yellow]Warning: nested Cursor agent detected. Reconcile may hang; "
+            f"prefer a host terminal for `sdd change --approve-id {cr.id}`.[/yellow]"
+        )
+    if cr.classification != "implementation_defect":
+        console.print("[cyan]Reconciling approved change (slice merge, 300s timeout)…[/cyan]")
     try:
-        applied = apply_change(root, cr)
+        applied = apply_change(root, cr, on_event=_event_printer)
     except RuntimeError as exc:
         _fail(str(exc), 2)
     console.print(f"[green]{applied.id} applied.[/green]")

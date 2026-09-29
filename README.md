@@ -10,7 +10,7 @@
 
 Vega SDD is an open-source control plane for building software with Cursor, Codex, Claude Code, Gemini CLI, or GitHub Copilot CLI. Product intent, architecture decisions, tasks, checks, review evidence, changes, and recovery state stay in the repository, so work can continue across terminals, sessions, and coding agents.
 
-> **Status: 0.4.0 alpha.** The framework has 205 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, hosted branch protection, deployment hooks, and application-specific safety remain your responsibility. See [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md).
+> **Status: 0.4.1 alpha.** The framework has 228 automated tests, Python 3.11/3.12 CI, package-build checks, incident-lifecycle benchmarks, and cross-project Python/Node/SQLite benchmarks. Real agent credentials, deployment hooks, and application-specific safety remain your responsibility. The public repository protects `main` with pull-request review, required CI, linear history, force-push/deletion blocking, and resolved-conversation enforcement. See [0.4.1 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.1.md).
 
 ## Choose your starting point
 
@@ -190,7 +190,7 @@ Graphify improves local structural retrieval. Headroom compresses context packs 
 | [Architecture](https://github.com/teja499-tech/vega-sdd/blob/main/docs/ARCHITECTURE.md) | Controller, adapters, state, capability routing, and safety boundaries |
 | [Agent adapters](https://github.com/teja499-tech/vega-sdd/blob/main/docs/AGENT_ADAPTERS.md) | Cursor, Codex, Claude, Gemini, Copilot, mock, and MCP behavior |
 | [Recovery](https://github.com/teja499-tech/vega-sdd/blob/main/docs/RECOVERY.md) | Crash recovery, checkpoints, and context hygiene |
-| [0.4.0 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.0.md) | Reproducible test and benchmark evidence |
+| [0.4.1 verification](https://github.com/teja499-tech/vega-sdd/blob/main/docs/VERIFICATION_0.4.1.md) | Reproducible test and benchmark evidence |
 
 ## Safety boundaries
 
