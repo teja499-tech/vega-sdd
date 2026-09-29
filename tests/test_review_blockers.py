@@ -84,7 +84,7 @@ def test_mcp_change_cannot_self_approve(initialized, monkeypatch):
     text = _call("sdd_change", {"description": "Add a weekly digest email", "approve": True})
     data = json.loads(text)
     assert data["applied"] is False
-    assert "sdd change --approve" in data["next_step"]
+    assert f"sdd change --approve-id {data['id']}" in data["next_step"]
     assert initialized.features_file.read_bytes() == before
 
 
@@ -96,3 +96,9 @@ def test_generated_readme_does_not_invent_ai_stack(initialized):
     guide = (initialized.sdd / "docs" / "DEVELOPER_GUIDE.md").read_text().lower()
     assert "ollama" not in guide
     assert "openrouter" not in guide
+
+
+def test_generated_cursor_change_command_uses_exact_approval(initialized):
+    command = (initialized.root / ".cursor" / "commands" / "sdd-change.md").read_text()
+    assert "sdd change --approve-id CR-..." in command
+    assert "Never re-run the request text" in command

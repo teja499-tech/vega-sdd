@@ -157,7 +157,7 @@ def test_invalid_change_preserves_approved_state(initialized):
         'feature_updates':[{'id':'F001','depends_on':['F001']}],
         'invalidate_tasks':[],
     }))
-    cr=ChangeRequest(id='CR-BAD',description='change',classification='requirement_change',approved=True)
+    cr=ChangeRequest(id='CR-BAD',description='change',classification='requirement_change',affected_features=['F001'],approved=True)
     with patch('universal_sdd.orchestrator.get_adapter',return_value=a):
         with pytest.raises(RuntimeError,match='before mutation'): apply_change(p.root,cr)
     assert p.features_file.read_bytes()==before
